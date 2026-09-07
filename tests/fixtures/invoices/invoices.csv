@@ -1,0 +1,10 @@
+Invoice Number,Customer Name,Amount,Currency,Issue Date,Due Date,Status,Customer Email
+INV-2024-001,Acme Corp GmbH,1500.00,EUR,2024-09-01,2024-09-15,OPEN,billing@acme.corp
+INV-2024-002,TechFlow Inc,4800.00,EUR,2024-09-03,2024-09-17,OPEN,ap@techflow.io
+INV-2024-501,Siemens Digital GmbH,2500.00,EUR,2024-09-01,2024-09-15,OPEN,payments@siemens.de
+INV-2024-701,BMW Group AG,1500.00,EUR,2024-09-01,2024-09-15,OPEN,invoices@bmw.de
+INV-2024-998,Zalando SE,3200.00,EUR,2024-09-02,2024-09-16,OPEN,billing@zalando.de
+INV-2024-8801,Global Tech SAS,1000.00,EUR,2024-09-01,2024-09-15,OPEN,compta@globaltech.fr
+INV-2024-8802,Delta Logistics BV,3500.00,EUR,2024-09-02,2024-09-16,OPEN,ap@deltalogistics.nl
+INV-2024-8803,Nexus Dynamics LLC,1500.00,EUR,2024-09-02,2024-09-16,OPEN,finance@nexusdynamics.com
+INV-UNPAID-999,Unpaid Enterprise Client,7500.00,EUR,2024-09-01,2024-09-30,OPEN,ap@unpaidclient.com

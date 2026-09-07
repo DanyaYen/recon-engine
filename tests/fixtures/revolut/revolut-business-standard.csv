@@ -1,0 +1,4 @@
+Completed Date,Description,Amount,Fee,Currency,State,Balance,Payer,Beneficiary,Reference
+2024-09-01 10:00:00,Transfer from Alpha Labs,2500.00,0.00,EUR,COMPLETED,2500.00,Alpha Labs GmbH,,INV-ALPHA-01
+2024-09-02 12:00:00,Payout to Contractor,-1200.00,0.00,EUR,COMPLETED,1300.00,,Jane Doe,DEV-SERVICES-AUG
+2024-09-03 15:30:00,Transfer from Beta Retail,750.50,0.00,EUR,COMPLETED,2050.50,Beta Retail SAS,,INV-BETA-449

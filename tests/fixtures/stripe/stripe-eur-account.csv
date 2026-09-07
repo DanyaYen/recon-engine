@@ -1,0 +1,4 @@
+id,Type,Gross,Fee,Net,Currency,Created (UTC),Description
+txn_eur_01,charge,500.00,15.20,484.80,EUR,2024-09-01 10:00,Invoice INV-EUR-101
+txn_eur_02,charge,1500.00,45.00,1455.00,EUR,2024-09-02 11:00,Invoice INV-EUR-102
+txn_eur_03,refund,-200.00,-6.00,-194.00,EUR,2024-09-03 12:00,Refund for invoice INV-EUR-099

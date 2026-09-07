@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt>
+    <GrpHdr>
+      <MsgId>MSG-20240901-001</MsgId>
+      <CreDtTm>2024-09-01T20:00:00Z</CreDtTm>
+    </GrpHdr>
+    <Stmt>
+      <Id>STMT-2024-09-01</Id>
+      <Acct>
+        <Id>
+          <IBAN>DE89370400440532013000</IBAN>
+        </Id>
+      </Acct>
+      <Ntry>
+        <Amt Ccy="EUR">2500.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <BookgDt>
+          <Dt>2024-09-01</Dt>
+        </BookgDt>
+        <ValDt>
+          <Dt>2024-09-01</Dt>
+        </ValDt>
+        <NtryDtls>
+          <TxDtls>
+            <Refs>
+              <EndToEndId>E2E-2024-001</EndToEndId>
+              <InstrId>INSTR-9901</InstrId>
+            </Refs>
+            <AmtDtls>
+              <TxAmt>
+                <Amt Ccy="EUR">2500.00</Amt>
+              </TxAmt>
+            </AmtDtls>
+            <RltdPties>
+              <Dbtr>
+                <Nm>Siemens Digital GmbH</Nm>
+              </Dbtr>
+              <DbtrAcct>
+                <Id>
+                  <IBAN>DE44500105175407324911</IBAN>
+                </Id>
+              </DbtrAcct>
+              <Cdtr>
+                <Nm>SaaS Platform Inc</Nm>
+              </Cdtr>
+            </RltdPties>
+            <RmtInf>
+              <Ustrd>Invoice INV-2024-501 Enterprise License</Ustrd>
+            </RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">120.00</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <BookgDt>
+          <Dt>2024-09-02</Dt>
+        </BookgDt>
+        <NtryDtls>
+          <TxDtls>
+            <RltdPties>
+              <Cdtr>
+                <Nm>Datadog Monitoring</Nm>
+              </Cdtr>
+            </RltdPties>
+            <RmtInf>
+              <Ustrd>Monthly subscription DD-88912</Ustrd>
+            </RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+    </Stmt>
+  </BkToCstmrStmt>
+</Document>

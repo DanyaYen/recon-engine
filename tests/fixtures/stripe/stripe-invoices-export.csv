@@ -1,0 +1,4 @@
+Balance transaction ID,Reporting category,Gross,Fee,Net,Currency,Created,Description,Customer Name,Customer Email
+txn_201,charge,1200.00,32.40,1167.60,EUR,2024-09-01 14:00,Invoice INV-2024-901,FinTech EU SAS,billing@fintecheu.com
+txn_202,charge,2400.00,64.80,2335.20,EUR,2024-09-02 16:30,Invoice INV-2024-902,SaaS Berlin GmbH,ap@saasberlin.de
+txn_203,charge,850.00,23.10,826.90,EUR,2024-09-03 09:15,Invoice INV-2024-903,Nordic Systems Oy,invoices@nordic.fi

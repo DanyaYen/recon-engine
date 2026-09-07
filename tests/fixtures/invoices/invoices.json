@@ -1,0 +1,102 @@
+[
+  {
+    "id": "in_acme_001",
+    "invoiceNumber": "INV-2024-001",
+    "amountCents": 150000,
+    "currency": "EUR",
+    "issueDate": "2024-09-01",
+    "dueDate": "2024-09-15",
+    "status": "OPEN",
+    "customerName": "Acme Corp GmbH",
+    "customerEmail": "billing@acme.corp"
+  },
+  {
+    "id": "in_techflow_002",
+    "invoiceNumber": "INV-2024-002",
+    "amountCents": 480000,
+    "currency": "EUR",
+    "issueDate": "2024-09-03",
+    "dueDate": "2024-09-17",
+    "status": "OPEN",
+    "customerName": "TechFlow Inc",
+    "customerEmail": "ap@techflow.io"
+  },
+  {
+    "id": "in_siemens_501",
+    "invoiceNumber": "INV-2024-501",
+    "amountCents": 250000,
+    "currency": "EUR",
+    "issueDate": "2024-09-01",
+    "dueDate": "2024-09-15",
+    "status": "OPEN",
+    "customerName": "Siemens Digital GmbH",
+    "customerEmail": "payments@siemens.de",
+    "customerIban": "DE44500105175407324911"
+  },
+  {
+    "id": "in_bmw_701",
+    "invoiceNumber": "INV-2024-701",
+    "amountCents": 150000,
+    "currency": "EUR",
+    "issueDate": "2024-09-01",
+    "dueDate": "2024-09-15",
+    "status": "OPEN",
+    "customerName": "BMW Group AG",
+    "customerEmail": "invoices@bmw.de"
+  },
+  {
+    "id": "in_zalando_998",
+    "invoiceNumber": "INV-2024-998",
+    "amountCents": 320000,
+    "currency": "EUR",
+    "issueDate": "2024-09-02",
+    "dueDate": "2024-09-16",
+    "status": "OPEN",
+    "customerName": "Zalando SE",
+    "customerEmail": "billing@zalando.de"
+  },
+  {
+    "id": "in_global_8801",
+    "invoiceNumber": "INV-2024-8801",
+    "amountCents": 100000,
+    "currency": "EUR",
+    "issueDate": "2024-09-01",
+    "dueDate": "2024-09-15",
+    "status": "OPEN",
+    "customerName": "Global Tech SAS",
+    "customerEmail": "compta@globaltech.fr"
+  },
+  {
+    "id": "in_delta_8802",
+    "invoiceNumber": "INV-2024-8802",
+    "amountCents": 350000,
+    "currency": "EUR",
+    "issueDate": "2024-09-02",
+    "dueDate": "2024-09-16",
+    "status": "OPEN",
+    "customerName": "Delta Logistics BV",
+    "customerEmail": "ap@deltalogistics.nl"
+  },
+  {
+    "id": "in_nexus_8803",
+    "invoiceNumber": "INV-2024-8803",
+    "amountCents": 150000,
+    "currency": "EUR",
+    "issueDate": "2024-09-02",
+    "dueDate": "2024-09-16",
+    "status": "OPEN",
+    "customerName": "Nexus Dynamics LLC",
+    "customerEmail": "finance@nexusdynamics.com"
+  },
+  {
+    "id": "in_unpaid_999",
+    "invoiceNumber": "INV-UNPAID-999",
+    "amountCents": 750000,
+    "currency": "EUR",
+    "issueDate": "2024-09-01",
+    "dueDate": "2024-09-30",
+    "status": "OPEN",
+    "customerName": "Unpaid Enterprise Client",
+    "customerEmail": "ap@unpaidclient.com"
+  }
+]

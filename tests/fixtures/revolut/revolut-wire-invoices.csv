@@ -1,0 +1,5 @@
+Completed Date,Description,Amount,Fee,Currency,State,Balance,Payer,Beneficiary,Reference
+2024-09-01 10:15:00,SEPA Credit Transfer,985.00,0.00,EUR,COMPLETED,985.00,Global Tech SAS,,INV-2024-8801
+2024-09-02 11:20:00,SEPA Credit Transfer,3500.00,0.00,EUR,COMPLETED,4485.00,Delta Logistics BV,,INV-2024-8802
+2024-09-03 14:45:00,International Wire,1480.00,0.00,EUR,COMPLETED,5965.00,Nexus Dynamics LLC,,INV-2024-8803
+2024-09-04 16:10:00,SEPA Credit Transfer,250.00,0.00,EUR,COMPLETED,6215.00,Krona Nordic AB,,INV-2024-8804

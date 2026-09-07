@@ -1,0 +1,16 @@
+# recon-engine
+> Ultra-fast Open-Source Statement Parser & Financial Reconciliation Engine in Bun.
+
+## Core Capabilities
+- Parsers: CAMT.053 (ISO 20022 XML), SWIFT MT940, Revolut CSV, Stripe CSV, Generic CSV.
+- Matcher: Deterministic exact metrics + Jaro-Winkler fuzzy remittance matching + Wire fee deduction tolerance.
+- Precision: Zero floating-point arithmetic. All money handled in integer minor units (cents).
+
+## CLI Invocation for Agents
+- Always use headless non-interactive mode:
+  bunx recon-engine match --statement <file> --invoices <file> --json --yes
+- Parse statement to stdout JSON:
+  bunx recon-engine parse <file> --json
+
+## Schema Specifications
+- Full specs and agent execution protocols available in AGENT.md

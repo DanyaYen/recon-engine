@@ -1,0 +1,127 @@
+/**
+ * Utilities for remittance information cleaning, legal entity stripping,
+ * and invoice reference token extraction.
+ */
+
+const LEGAL_SUFFIXES = [
+  'gmbh',
+  'ug',
+  'ag',
+  'llc',
+  'ltd',
+  'limited',
+  'inc',
+  'corp',
+  'corporation',
+  'sas',
+  'sarl',
+  'bv',
+  'nv',
+  'sp z o o',
+  'spzoo',
+  'sa',
+  'plc',
+  'co',
+  'cie',
+];
+
+const STOP_WORDS = [
+  'rechnung',
+  'rechnungsnr',
+  'rechnungsnummer',
+  'rechnung-nr',
+  'invoice',
+  'bill',
+  'payment',
+  'zahlung',
+  'ueberweisung',
+  'überweisung',
+  'sepa',
+  'sepa-ueberweisung',
+  'credit',
+  'transfer',
+  'wire',
+  'ref',
+  'reference',
+  'kdnr',
+  'kundennummer',
+  'from',
+  'to',
+  'fuer',
+  'für',
+];
+
+/**
+ * Normalizes a company or counterparty name by lowercasing,
+ * removing punctuation, and stripping common legal corporate forms.
+ */
+export function cleanCompanyName(name: string): string {
+  let cleaned = name.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, ' ');
+
+  for (const suffix of LEGAL_SUFFIXES) {
+    const regex = new RegExp(`\\b${suffix}\\b`, 'gi');
+    cleaned = cleaned.replace(regex, ' ');
+  }
+
+  return cleaned.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Extracts potential invoice reference identifiers from unstructured remittance text.
+ * Matches patterns like:
+ * - "INV-2024-001"
+ * - "INV/2024/099"
+ * - "#12345"
+ * - "RE-98765"
+ * - "2024-1002"
+ */
+export function extractInvoiceCandidates(text: string): string[] {
+  if (!text) return [];
+
+  const candidates = new Set<string>();
+
+  // Pattern 1: Alphanumeric codes with prefixes like INV-1234, RE-2024-001, #9982, PO-123
+  const prefixRegex = /\b(?:inv|re|rech|bill|po|order|invnr)[-_/#\s]*([a-z0-9-_/]{3,30})\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = prefixRegex.exec(text)) !== null) {
+    if (match[1] && match[1].length >= 3) {
+      candidates.add(match[1].replace(/[\s/]/g, '-').toUpperCase());
+      candidates.add(match[0].replace(/[\s/]/g, '-').toUpperCase());
+    }
+  }
+
+  // Pattern 2: Hash prefixed identifiers: #12345, #INV-900
+  const hashRegex = /#([a-z0-9-_]{3,25})/gi;
+  while ((match = hashRegex.exec(text)) !== null) {
+    candidates.add(match[1].toUpperCase());
+  }
+
+  // Pattern 3: Common invoice number shapes like 2024-0012, 2024/0012, 1000293
+  const numberRegex = /\b(202[0-9][-/_][0-9]{3,8})\b/g;
+  while ((match = numberRegex.exec(text)) !== null) {
+    candidates.add(match[1].replace(/[/_]/g, '-'));
+  }
+
+  return Array.from(candidates);
+}
+
+/**
+ * Cleans remittance text for fuzzy similarity comparison.
+ */
+export function normalizeRemittance(text: string): string {
+  if (!text) return '';
+
+  let cleaned = text.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, ' ');
+
+  for (const word of STOP_WORDS) {
+    const regex = new RegExp(`\\b${word}\\b`, 'gi');
+    cleaned = cleaned.replace(regex, ' ');
+  }
+
+  for (const suffix of LEGAL_SUFFIXES) {
+    const regex = new RegExp(`\\b${suffix}\\b`, 'gi');
+    cleaned = cleaned.replace(regex, ' ');
+  }
+
+  return cleaned.replace(/\s+/g, ' ').trim();
+}

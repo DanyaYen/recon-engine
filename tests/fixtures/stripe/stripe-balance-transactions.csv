@@ -1,0 +1,5 @@
+id,Type,Source,Amount,Fee,Net,Currency,Created (UTC),Available on (UTC),Description,Customer Facing Amount,Customer Facing Currency
+txn_101,charge,ch_101,150.00,4.65,145.35,usd,2024-09-01 12:00,2024-09-03 12:00,Subscription payment INV-STRIPE-001,150.00,usd
+txn_102,charge,ch_102,499.00,14.77,484.23,usd,2024-09-02 13:00,2024-09-04 13:00,Annual Pro License INV-STRIPE-002,499.00,usd
+txn_103,payout,po_101,-629.58,0.00,-629.58,usd,2024-09-05 08:00,2024-09-05 08:00,STRIPE PAYOUT po_101,629.58,usd
+txn_104,refund,re_101,-50.00,-1.75,-48.25,usd,2024-09-06 10:00,2024-09-08 10:00,Partial refund for seat decrease,50.00,usd

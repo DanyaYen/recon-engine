@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.04">
+  <BkToCstmrStmt>
+    <GrpHdr>
+      <MsgId>SEPA-B2B-202409</MsgId>
+    </GrpHdr>
+    <Stmt>
+      <Id>STMT-SEPA-4412</Id>
+      <Ntry>
+        <Amt Ccy="EUR">7800.50</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <BookgDt>
+          <Dt>2024-09-03</Dt>
+        </BookgDt>
+        <NtryDtls>
+          <TxDtls>
+            <Refs>
+              <EndToEndId>SEPA-E2E-778899</EndToEndId>
+            </Refs>
+            <RltdPties>
+              <Dbtr>
+                <Nm>Airbus Operations SAS</Nm>
+              </Dbtr>
+              <DbtrAcct>
+                <Id>
+                  <IBAN>FR7630006000011234567890189</IBAN>
+                </Id>
+              </DbtrAcct>
+            </RltdPties>
+            <RmtInf>
+              <Ustrd>RECHNG 2024-7700 AIRBUS CONTRACT AUG</Ustrd>
+            </RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+    </Stmt>
+  </BkToCstmrStmt>
+</Document>

@@ -1,0 +1,192 @@
+import { describe, it, expect } from 'bun:test';
+import { readFileSync, readdirSync } from 'fs';
+import { join } from 'path';
+import { parseStatement } from '../src/parsers/index.js';
+import { detectFormat } from '../src/parsers/detector.js';
+
+const FIXTURES_DIR = join(import.meta.dir, 'fixtures');
+
+describe('Universal Statement Parser - Auto Detection and Parsing', () => {
+  // 1. Revolut fixtures
+  describe('Revolut Business CSV', () => {
+    const revolutDir = join(FIXTURES_DIR, 'revolut');
+    const files = readdirSync(revolutDir);
+
+    it('has at least 5 fixtures', () => {
+      expect(files.length).toBeGreaterThanOrEqual(5);
+    });
+
+    for (const file of files) {
+      it(`parses ${file} correctly`, async () => {
+        const content = readFileSync(join(revolutDir, file), 'utf-8');
+        const detected = detectFormat(content, file);
+        expect(detected.id).toBe('revolut-csv');
+
+        const result = await parseStatement(content);
+        expect(result.parserId).toBe('revolut-csv');
+        expect(result.transactions.length).toBeGreaterThan(0);
+
+        for (const tx of result.transactions) {
+          expect(tx.bookingDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+          expect(tx.amountCents).toBeGreaterThan(0);
+          expect(['INCOMING', 'OUTGOING']).toContain(tx.direction);
+          expect(tx.currency.length).toBe(3);
+        }
+      });
+    }
+
+    it('filters out REVERTED and DECLINED transactions in revolut-with-reverted.csv', async () => {
+      const content = readFileSync(join(revolutDir, 'revolut-with-reverted.csv'), 'utf-8');
+      const result = await parseStatement(content);
+      // Original file has 4 rows: 2 COMPLETED, 1 DECLINED, 1 REVERTED
+      expect(result.transactions.length).toBe(2);
+      expect(result.transactions[0].amountCents).toBe(100000);
+      expect(result.transactions[1].amountCents).toBe(200000);
+    });
+  });
+
+  // 2. Stripe fixtures
+  describe('Stripe Export CSV', () => {
+    const stripeDir = join(FIXTURES_DIR, 'stripe');
+    const files = readdirSync(stripeDir);
+
+    it('has at least 4 fixtures', () => {
+      expect(files.length).toBeGreaterThanOrEqual(4);
+    });
+
+    for (const file of files) {
+      it(`parses ${file} correctly`, async () => {
+        const content = readFileSync(join(stripeDir, file), 'utf-8');
+        const detected = detectFormat(content, file);
+        expect(detected.id).toBe('stripe-csv');
+
+        const result = await parseStatement(content);
+        expect(result.parserId).toBe('stripe-csv');
+        expect(result.transactions.length).toBeGreaterThan(0);
+
+        for (const tx of result.transactions) {
+          expect(tx.bookingDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+          expect(tx.amountCents).toBeGreaterThan(0);
+          expect(['INCOMING', 'OUTGOING']).toContain(tx.direction);
+        }
+      });
+    }
+  });
+
+  // 3. CAMT.053 XML fixtures
+  describe('CAMT.053 ISO 20022 XML', () => {
+    const camtDir = join(FIXTURES_DIR, 'camt053');
+    const files = readdirSync(camtDir);
+
+    it('has at least 5 fixtures', () => {
+      expect(files.length).toBeGreaterThanOrEqual(5);
+    });
+
+    for (const file of files) {
+      it(`parses ${file} correctly`, async () => {
+        const content = readFileSync(join(camtDir, file), 'utf-8');
+        const detected = detectFormat(content, file);
+        expect(detected.id).toBe('camt053');
+
+        const result = await parseStatement(content);
+        expect(result.parserId).toBe('camt053');
+        expect(result.transactions.length).toBeGreaterThan(0);
+
+        for (const tx of result.transactions) {
+          expect(tx.bookingDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+          expect(tx.amountCents).toBeGreaterThan(0);
+          expect(tx.currency).toBe('EUR');
+        }
+      });
+    }
+
+    it('extracts structured creditor reference in camt053-structured-reference.xml', async () => {
+      const content = readFileSync(join(camtDir, 'camt053-structured-reference.xml'), 'utf-8');
+      const result = await parseStatement(content);
+      expect(result.transactions[0].reference).toBe('INV-2024-8891');
+      expect(result.transactions[0].counterpartyName).toBe('KPMG Advisory GmbH');
+    });
+  });
+
+  // 4. SWIFT MT940 fixtures
+  describe('SWIFT MT940', () => {
+    const mt940Dir = join(FIXTURES_DIR, 'mt940');
+    const files = readdirSync(mt940Dir);
+
+    it('has at least 5 fixtures', () => {
+      expect(files.length).toBeGreaterThanOrEqual(5);
+    });
+
+    for (const file of files) {
+      it(`parses ${file} correctly`, async () => {
+        const content = readFileSync(join(mt940Dir, file), 'utf-8');
+        const detected = detectFormat(content, file);
+        expect(detected.id).toBe('mt940');
+
+        const result = await parseStatement(content);
+        expect(result.parserId).toBe('mt940');
+        expect(result.transactions.length).toBeGreaterThan(0);
+
+        for (const tx of result.transactions) {
+          expect(tx.bookingDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+          expect(tx.amountCents).toBeGreaterThan(0);
+        }
+      });
+    }
+
+    it('extracts counterparty and reference from Deutsche Bank subfields ?20 and ?32', async () => {
+      const content = readFileSync(join(mt940Dir, 'mt940-deutsche-bank.sta'), 'utf-8');
+      const result = await parseStatement(content);
+      expect(result.transactions.length).toBe(2);
+      expect(result.transactions[0].counterpartyName).toBe('BMW GROUP AG');
+      expect(result.transactions[0].reference).toContain('INV-2024-701');
+    });
+
+    it('extracts counterparty and reference from Commerzbank /EREF/ and /BENM/', async () => {
+      const content = readFileSync(join(mt940Dir, 'mt940-commerzbank.sta'), 'utf-8');
+      const result = await parseStatement(content);
+      expect(result.transactions[0].counterpartyName).toBe('ZALANDO SE');
+      expect(result.transactions[0].reference).toBe('INV-2024-998');
+    });
+  });
+
+  // 5. Generic CSV fixtures
+  describe('Generic CSV & Custom Mapping', () => {
+    const genericDir = join(FIXTURES_DIR, 'generic');
+
+    it('parses German semicolon statement with automatic synonym detection', async () => {
+      const content = readFileSync(join(genericDir, 'generic-european-semicolon.csv'), 'utf-8');
+      const result = await parseStatement(content);
+      expect(result.transactions.length).toBe(3);
+      expect(result.transactions[0].amountCents).toBe(345000);
+      expect(result.transactions[0].direction).toBe('INCOMING');
+      expect(result.transactions[1].amountCents).toBe(14990);
+      expect(result.transactions[1].direction).toBe('OUTGOING');
+    });
+
+    it('parses multiline quoted CSV correctly', async () => {
+      const content = readFileSync(join(genericDir, 'generic-quoted-multiline.csv'), 'utf-8');
+      const result = await parseStatement(content);
+      expect(result.transactions.length).toBe(2);
+      expect(result.transactions[0].amountCents).toBe(150050);
+      expect(result.transactions[0].reference).toContain('Invoice #2024-99');
+    });
+
+    it('supports custom --map parameter for generic-custom-headers.csv', async () => {
+      const content = readFileSync(join(genericDir, 'generic-custom-headers.csv'), 'utf-8');
+      const result = await parseStatement(content, {
+        columnMapping: {
+          date: 'col_when',
+          counterparty: 'col_who',
+          amount: 'col_val',
+          reference: 'col_note',
+        },
+      });
+      expect(result.transactions.length).toBe(3);
+      expect(result.transactions[0].bookingDate).toBe('2024-09-01');
+      expect(result.transactions[0].counterpartyName).toBe('FinTech Client A');
+      expect(result.transactions[0].reference).toBe('INV-MAP-001');
+      expect(result.transactions[0].amountCents).toBe(220000);
+    });
+  });
+});
