@@ -172,6 +172,7 @@ export function reconcile(
     let bestInvoice: NormalizedInvoice | null = null;
     let bestScore = 0;
     let bestReason = '';
+    let bestHasInvoiceRef = false;
 
     for (const inv of availableInvoices) {
       if (!isInvoiceAvailable(inv.id)) continue;
@@ -187,43 +188,64 @@ export function reconcile(
       // Amount must be exact in this pass
       if (tx.amountCents !== inv.amountCents) continue;
 
-      const { score, reason } = scoreRemittanceMatch(
+      const { score, reason, hasInvoiceReference } = scoreRemittanceMatch(
         tx.reference,
         tx.counterpartyName,
         inv.invoiceNumber,
         inv.customerName
       );
 
-      if (score > bestScore && score >= 0.75) {
+      if (score > bestScore && score >= 0.70) {
         bestScore = score;
         bestInvoice = inv;
         bestReason = reason || 'High textual similarity on remittance';
+        bestHasInvoiceRef = hasInvoiceReference;
       }
     }
 
-    if (bestInvoice && bestScore >= 0.75) {
+    if (bestInvoice && bestScore >= 0.70) {
       matchedInvoiceIds.add(bestInvoice.id);
       remainingTxs.splice(i, 1);
 
-      const status = bestScore >= 0.95 ? 'MATCHED' : 'REVIEW_NEEDED';
+      // Ban matching solely on company name as MATCHED; force REVIEW_NEEDED
+      const isCompanyOnly = !bestHasInvoiceRef;
+      const status = !isCompanyOnly && bestScore >= 0.95 ? 'MATCHED' : 'REVIEW_NEEDED';
+      const confidence = isCompanyOnly
+        ? Math.min(0.70, bestScore)
+        : Math.round(bestScore * 100) / 100;
+
+      const discrepancies = [bestReason];
+      if (isCompanyOnly) {
+        discrepancies.push('Missing invoice reference in remittance: matched solely on company name');
+      }
 
       matches.push({
         status,
         level: 'FUZZY_REFERENCE',
-        confidenceScore: Math.round(bestScore * 100) / 100,
+        confidenceScore: confidence,
         transaction: tx,
         invoice: bestInvoice,
-        discrepancies: [bestReason],
+        discrepancies,
         applied: false,
       });
     }
   }
 
   // =========================================================================
-  // PASS 4: Fee & Wire Commission Tolerance Match
+  // PASS 4: Fee & Wire Commission Tolerance Match (Collision-Safe)
   // =========================================================================
   for (let i = remainingTxs.length - 1; i >= 0; i--) {
     const tx = remainingTxs[i];
+
+    interface QualifyingCandidate {
+      inv: NormalizedInvoice;
+      amountDiffCents: number;
+      score: number;
+      reason: string;
+      hasInvoiceReference: boolean;
+    }
+
+    const qualifying: QualifyingCandidate[] = [];
 
     for (const inv of availableInvoices) {
       if (!isInvoiceAvailable(inv.id)) continue;
@@ -239,7 +261,7 @@ export function reconcile(
       // In fee deduction: amount received is less than invoice amount
       const amountDiffCents = inv.amountCents - tx.amountCents;
 
-      // Only check if amount received is less (underpayment/fee) or exact
+      // Only check if amount received is less (underpayment/fee)
       if (amountDiffCents > 0) {
         const diffPercent = amountDiffCents / inv.amountCents;
         const withinFeeLimit =
@@ -247,7 +269,7 @@ export function reconcile(
 
         if (withinFeeLimit) {
           // Verify counterparty or reference match
-          const { score, reason } = scoreRemittanceMatch(
+          const { score, reason, hasInvoiceReference } = scoreRemittanceMatch(
             tx.reference,
             tx.counterpartyName,
             inv.invoiceNumber,
@@ -255,25 +277,68 @@ export function reconcile(
           );
 
           if (score >= 0.70) {
-            matchedInvoiceIds.add(inv.id);
-            remainingTxs.splice(i, 1);
-
-            const feeFormatted = formatCents(amountDiffCents, tx.currency);
-            const discNote = `Amount discrepancy of ${feeFormatted} within fee tolerance (${reason || 'reference matched'})`;
-
-            matches.push({
-              status: 'REVIEW_NEEDED',
-              level: 'FEE_TOLERANCE',
-              confidenceScore: Math.round(score * 0.9 * 100) / 100,
-              transaction: tx,
-              invoice: inv,
-              discrepancies: [discNote],
-              applied: false,
+            qualifying.push({
+              inv,
+              amountDiffCents,
+              score,
+              reason: reason || 'reference matched',
+              hasInvoiceReference,
             });
-            break;
           }
         }
       }
+    }
+
+    if (qualifying.length === 1) {
+      const cand = qualifying[0];
+      matchedInvoiceIds.add(cand.inv.id);
+      remainingTxs.splice(i, 1);
+
+      const feeFormatted = formatCents(cand.amountDiffCents, tx.currency);
+      const discNote = `Amount discrepancy of ${feeFormatted} within fee tolerance (${cand.reason})`;
+
+      matches.push({
+        status: 'REVIEW_NEEDED',
+        level: 'FEE_TOLERANCE',
+        confidenceScore: Math.round(cand.score * 0.9 * 100) / 100,
+        feeDeductionCents: cand.amountDiffCents,
+        transaction: tx,
+        invoice: cand.inv,
+        discrepancies: [discNote],
+        applied: false,
+      });
+    } else if (qualifying.length > 1) {
+      // GREEDY COLLISION TRAP PROTECTED:
+      // Multiple invoices qualify within fee tolerance window.
+      // Strictly prevent greedy auto-match (MATCHED).
+      // Force REVIEW_NEEDED, degrade confidenceScore to 0.65, and record warning.
+      qualifying.sort(
+        (a, b) => b.score - a.score || a.amountDiffCents - b.amountDiffCents
+      );
+      const best = qualifying[0];
+
+      matchedInvoiceIds.add(best.inv.id);
+      remainingTxs.splice(i, 1);
+
+      const feeFormatted = formatCents(best.amountDiffCents, tx.currency);
+      const candidateList = qualifying
+        .map((q) => `${q.inv.invoiceNumber} (${formatCents(q.inv.amountCents, q.inv.currency)})`)
+        .join(', ');
+
+      matches.push({
+        status: 'REVIEW_NEEDED',
+        level: 'FEE_TOLERANCE',
+        confidenceScore: 0.65,
+        feeDeductionCents: best.amountDiffCents,
+        transaction: tx,
+        invoice: best.inv,
+        discrepancies: [
+          'Ambiguous match: multiple invoices qualify within fee tolerance window',
+          `Conflicting candidates: ${candidateList}`,
+          `Suggested candidate: ${best.inv.invoiceNumber} with fee deduction of ${feeFormatted}`,
+        ],
+        applied: false,
+      });
     }
   }
 

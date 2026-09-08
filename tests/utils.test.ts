@@ -67,11 +67,13 @@ describe('Text utilities', () => {
     expect(candidates).toContain('88912');
   });
 
-  it('normalizes remittance information', () => {
-    const text = 'Rechnung INV-2024-99 payment for software subscription GmbH';
+  it('normalizes remittance information and strips stop-words and tags', () => {
+    const text = 'EREF+9912 Rechnung INV-2024-99 payment for software subscription GmbH';
     const normalized = normalizeRemittance(text);
-    expect(normalized).toContain('inv 2024 99');
+    expect(normalized).toContain('2024 99');
     expect(normalized).not.toContain('rechnung');
+    expect(normalized).not.toContain('inv');
+    expect(normalized).not.toContain('eref');
     expect(normalized).not.toContain('gmbh');
   });
 });

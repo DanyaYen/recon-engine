@@ -3,7 +3,7 @@
  * optimized for financial remittance and invoice matching.
  */
 
-import { cleanCompanyName, extractInvoiceCandidates } from './text.js';
+import { cleanCompanyName, extractInvoiceCandidates, normalizeRemittance } from './text.js';
 
 /**
  * Calculates standard Jaro similarity between two strings.
@@ -119,10 +119,40 @@ export interface RemittanceScoreResult {
   score: number;
   reason?: string;
   matchedToken?: string;
+  hasInvoiceReference: boolean;
+}
+
+/**
+ * Compares an extracted candidate token against an invoice number.
+ * Protects against false positives when two invoice numbers share a common prefix
+ * (e.g. "INV-2024-8803" vs "INV-2024-001"), by verifying the distinct identifier suffix.
+ */
+function compareInvoiceTokens(candidate: string, invoiceNum: string): number {
+  const c = candidate.toLowerCase().trim();
+  const inv = invoiceNum.toLowerCase().trim();
+  if (c === inv) return 1.0;
+
+  const baseScore = jaroWinklerSimilarity(c, inv);
+  if (baseScore < 0.75) return baseScore;
+
+  // Extract suffix numbers (e.g. "8803" vs "001")
+  const cNum = c.match(/[0-9]{2,10}[a-z]?$/)?.[0];
+  const invNum = inv.match(/[0-9]{2,10}[a-z]?$/)?.[0];
+
+  if (cNum && invNum) {
+    if (cNum === invNum) return 1.0;
+    const numSim = jaroSimilarity(cNum, invNum);
+    if (numSim < 0.6) {
+      return baseScore * 0.4;
+    }
+  }
+
+  return baseScore;
 }
 
 /**
  * Scores how well a bank statement remittance/reference matches an invoice number and customer name.
+ * Pre-processes remittance against banking stop-words and tags (EREF+, SVWZ+, etc.) before fuzzy comparison.
  */
 export function scoreRemittanceMatch(
   remittance: string | undefined,
@@ -130,7 +160,8 @@ export function scoreRemittanceMatch(
   invoiceNumber: string,
   customerName: string
 ): RemittanceScoreResult {
-  const normalizedRemit = (remittance || '').toLowerCase().trim();
+  const rawRemit = remittance || '';
+  const normalizedRemit = rawRemit.toLowerCase().trim();
   const normalizedInvNum = invoiceNumber.toLowerCase().trim();
   const cleanInvNum = normalizedInvNum.replace(/[^a-z0-9]/g, '');
 
@@ -140,6 +171,7 @@ export function scoreRemittanceMatch(
       score: 1.0,
       reason: `Exact invoice number '${invoiceNumber}' found in remittance`,
       matchedToken: invoiceNumber,
+      hasInvoiceReference: true,
     };
   }
 
@@ -150,16 +182,45 @@ export function scoreRemittanceMatch(
       score: 0.98,
       reason: `Normalized invoice number '${invoiceNumber}' found in remittance`,
       matchedToken: invoiceNumber,
+      hasInvoiceReference: true,
     };
   }
 
-  // 3. Candidate tokens extracted from remittance tested against invoice number
-  const candidates = extractInvoiceCandidates(remittance || '');
+  // Check company compatibility if both counterparty and customer are present
+  let companyConflicting = false;
+  let companyCompatScore = 0;
+  if (counterpartyName && customerName) {
+    const cleanCounterparty = cleanCompanyName(counterpartyName);
+    const cleanCustomer = cleanCompanyName(customerName);
+
+    if (cleanCounterparty && cleanCustomer) {
+      if (
+        cleanCounterparty.includes(cleanCustomer) ||
+        cleanCustomer.includes(cleanCounterparty)
+      ) {
+        companyCompatScore = 0.95;
+      } else {
+        companyCompatScore = jaroWinklerSimilarity(cleanCounterparty, cleanCustomer);
+      }
+      if (companyCompatScore < 0.45) {
+        companyConflicting = true;
+      }
+    }
+  }
+
+  // 3. Pre-process and sanitize remittance (strip EREF+, SVWZ+, IBAN, BIC, stop-words)
+  const sanitizedRemit = normalizeRemittance(rawRemit);
+
+  // Candidate tokens extracted from both raw remittance and sanitized remittance
+  const rawCandidates = extractInvoiceCandidates(rawRemit);
+  const sanitizedCandidates = extractInvoiceCandidates(sanitizedRemit);
+  const allCandidates = Array.from(new Set([...rawCandidates, ...sanitizedCandidates]));
+
   let bestTokenScore = 0;
   let bestToken = '';
 
-  for (const candidate of candidates) {
-    const score = jaroWinklerSimilarity(
+  for (const candidate of allCandidates) {
+    const score = compareInvoiceTokens(
       candidate.toLowerCase(),
       normalizedInvNum
     );
@@ -169,11 +230,27 @@ export function scoreRemittanceMatch(
     }
   }
 
+  // Also test Jaro-Winkler on individual words of sanitized remittance
+  const sanitizedWords = sanitizedRemit.split(/\s+/).filter((w) => w.length >= 3);
+  for (const word of sanitizedWords) {
+    const score = compareInvoiceTokens(word, normalizedInvNum);
+    if (score > bestTokenScore) {
+      bestTokenScore = score;
+      bestToken = word;
+    }
+  }
+
+  // If company names are known to conflict, do not accept non-exact token matches
+  if (companyConflicting && bestTokenScore < 0.98) {
+    bestTokenScore = bestTokenScore * 0.4;
+  }
+
   if (bestTokenScore >= 0.85) {
     return {
       score: bestTokenScore,
       reason: `Fuzzy match on invoice token '${bestToken}' vs '${invoiceNumber}' (score: ${bestTokenScore.toFixed(2)})`,
       matchedToken: bestToken,
+      hasInvoiceReference: true,
     };
   }
 
@@ -195,16 +272,20 @@ export function scoreRemittanceMatch(
     }
   }
 
+  // Company-only match (invoice reference or token completely absent)
+  // Strictly forbid high-confidence match on company alone; demote score to <= 0.70 and require review
   if (nameScore >= 0.80) {
     return {
-      score: nameScore * 0.9, // Slight discount when matching only company name without invoice ID
-      reason: `Fuzzy match on company name: '${counterpartyName}' vs '${customerName}' (score: ${nameScore.toFixed(2)})`,
+      score: Math.min(0.70, nameScore * 0.70),
+      reason: `Company name matched ('${counterpartyName}' vs '${customerName}'), but invoice reference was missing`,
+      hasInvoiceReference: false,
     };
   }
 
-  const overallScore = Math.max(bestTokenScore, nameScore * 0.85);
+  const overallScore = Math.max(bestTokenScore, nameScore * 0.6);
   return {
     score: overallScore,
-    reason: overallScore > 0.6 ? `Weak textual similarity (${overallScore.toFixed(2)})` : undefined,
+    reason: overallScore >= 0.6 ? `Weak textual similarity (${overallScore.toFixed(2)})` : undefined,
+    hasInvoiceReference: false,
   };
 }

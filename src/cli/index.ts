@@ -212,8 +212,12 @@ program
       };
 
       if (options.yes) {
-        // Auto-approve all REVIEW_NEEDED suggestions
+        // Auto-approve unambiguous REVIEW_NEEDED suggestions
+        // Ambiguous matches (multiple candidates within fee tolerance) remain REVIEW_NEEDED for safety
         for (const m of reviewMatches) {
+          if (m.discrepancies.some((d) => d.includes('Ambiguous match'))) {
+            continue;
+          }
           m.status = 'MATCHED';
           m.discrepancies.push('[Auto-confirmed via --yes]');
         }

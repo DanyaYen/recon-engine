@@ -18,6 +18,7 @@ export const MatchResultSchema = z.object({
   status: MatchStatusSchema,
   level: MatchLevelSchema,
   confidenceScore: z.number().min(0).max(1),
+  feeDeductionCents: z.number().int().nonnegative().optional().describe('Deducted bank wire fee in minor units'),
   transaction: NormalizedTransactionSchema,
   invoice: NormalizedInvoiceSchema.optional(),
   discrepancies: z.array(z.string()).default([]),

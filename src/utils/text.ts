@@ -26,6 +26,14 @@ const LEGAL_SUFFIXES = [
 ];
 
 const STOP_WORDS = [
+  'eref',
+  'svwz',
+  'kref',
+  'mref',
+  'iban',
+  'bic',
+  'inv',
+  'rech',
   'rechnung',
   'rechnungsnr',
   'rechnungsnummer',
@@ -107,11 +115,20 @@ export function extractInvoiceCandidates(text: string): string[] {
 
 /**
  * Cleans remittance text for fuzzy similarity comparison.
+ * Strips ISO/SWIFT tags (EREF+, SVWZ+, /EREF/, etc.), banking stop-words, and legal entity forms.
  */
 export function normalizeRemittance(text: string): string {
   if (!text) return '';
 
-  let cleaned = text.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, ' ');
+  let cleaned = text;
+
+  // Strip banking field tags like EREF+..., SVWZ+..., /EREF/..., etc.
+  cleaned = cleaned.replace(/\b(eref|svwz|kref|mref|pref|cred|debt)\+/gi, ' ');
+  cleaned = cleaned.replace(/\/(eref|svwz|kref|mref|benm|iban|bic)\//gi, ' ');
+  cleaned = cleaned.replace(/\?[0-9]{2}/g, ' '); // SWIFT subfield markers like ?20, ?32
+
+  // Remove punctuation
+  cleaned = cleaned.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()\\+?<>]/g, ' ');
 
   for (const word of STOP_WORDS) {
     const regex = new RegExp(`\\b${word}\\b`, 'gi');
