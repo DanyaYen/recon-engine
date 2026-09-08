@@ -111,6 +111,7 @@ interface MatchResult {
   status: 'MATCHED' | 'REVIEW_NEEDED' | 'UNMATCHED';
   level: 'EXACT_REFERENCE' | 'EXACT_METRICS' | 'FUZZY_REFERENCE' | 'FEE_TOLERANCE' | 'MANUAL_REVIEW' | 'NONE';
   confidence: number;              // 0.0 to 1.0
+  feeDeductionCents?: number;      // Deducted bank wire fee in minor units (invoice - tx)
   discrepancies: string[];         // Human and machine-readable explanation of discrepancies
 }
 ```

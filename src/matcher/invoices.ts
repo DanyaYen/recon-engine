@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from 'fs';
+import { z } from 'zod';
 import { NormalizedInvoiceSchema, type NormalizedInvoice } from '../schemas/invoice.js';
 import { parseCsv } from '../utils/csv.js';
 import { parseAmountToCents } from '../utils/money.js';
@@ -29,21 +30,28 @@ export async function loadInvoices(pathOrContent: string): Promise<NormalizedInv
     isPath = true;
   }
 
-  const trimmed = content.trim();
+  let parsedJson: unknown = null;
+  let isJson = false;
 
-  // 1. JSON handling
-  if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
-    try {
-      const parsed = JSON.parse(trimmed);
-      const rawList = Array.isArray(parsed) ? parsed : parsed.invoices || [parsed];
-      return rawList.map((item: unknown) => NormalizedInvoiceSchema.parse(item));
-    } catch (err: any) {
-      if (!isPath) throw err;
-      // Fallback to CSV if JSON parse fails on file
+  try {
+    parsedJson = JSON.parse(content);
+    isJson = true;
+  } catch {
+    // Это действительно не JSON, пробуем CSV ниже
+  }
+
+  if (isJson) {
+    // Если это был JSON, валидируем строго. Никакого фоллбэка в CSV!
+    const result = z.array(NormalizedInvoiceSchema).safeParse(parsedJson);
+    if (!result.success) {
+      console.error(`Validation error in invoices JSON:`, result.error.format());
+      process.exit(1);
     }
+    return result.data;
   }
 
   // 2. CSV handling
+  const trimmed = content.trim();
   const { headers, rows } = parseCsv(trimmed);
   if (rows.length === 0) {
     throw new Error('No invoice records found in input.');

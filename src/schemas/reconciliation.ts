@@ -23,6 +23,7 @@ export const MatchResultSchema = z.object({
   invoice: NormalizedInvoiceSchema.optional(),
   discrepancies: z.array(z.string()).default([]),
   applied: z.boolean().default(false).describe('Whether the invoice was marked paid in the external system'),
+  requiresForce: z.boolean().optional().describe('Whether confirming this match with --yes requires explicit --force'),
 });
 
 export type MatchResult = z.infer<typeof MatchResultSchema>;

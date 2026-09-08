@@ -1,14 +1,17 @@
 # ⚡ Reconciliation-as-Code (`recon-engine`)
 
-> Ultra-fast Open-Source Statement Parser & Financial Reconciliation Engine for B2B Startups, Marketplaces, and Developers.
+> Stateless, Deterministic Reconciliation Engine & Parser Library (In-Memory Batch Matching for B2B SaaS).
 
 ![The Real-World Reconciliation Benchmark](./assets/benchmark.png)
 
 [![Bun](https://img.shields.io/badge/Bun-1.3+-black.svg?logo=bun)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue.svg?logo=typescript)](https://www.typescriptlang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/Tests-72%20passed-success.svg)](./tests)
+[![Tests](https://img.shields.io/badge/Tests-83%20passed-success.svg)](./tests)
 [![AI Ready](https://img.shields.io/badge/AI%20Agents-AGENT.md-purple.svg)](./AGENT.md)
+
+> [!IMPORTANT]
+> **Architectural Boundary & Positioning**: `recon-engine` is **not** a replacement for a General Ledger (GL) or core banking ledger. It is a stateless, deterministic reconciliation engine & parser library designed exclusively for pure in-memory batch calculations inside the user's own infrastructure. Double-entry bookkeeping, ledger balance mutations, and financial audit persistence remain strictly the responsibility of your primary database and GL.
 
 ![Reconciliation-as-Code Demo](./demo.gif)
 
@@ -133,6 +136,22 @@ Executed on Bun v1.3+ (1,000 transactions per batch):
 - [ ] **DATEV & Accounting Export**: Automatic conversion of matched pairs into standard German DATEV CSV.
 - [ ] **ECB Multi-Currency Tolerance**: On-the-fly EUR/USD conversion via ECB daily reference rates for FX reconciliation.
 - [ ] **Append-Only Double-Entry Ledger**: Native immutable ledger plugin for BaaS platforms and escrow compliance.
+
+---
+
+## 🎯 Design Scope & Intentional Boundaries
+
+`recon-engine` is purpose-built as a **fast, lightweight B2B statement reconciliation tool** to replace fragile ad-hoc scripts. It is not an enterprise clearinghouse like Modern Treasury or Visa DPS.
+
+### Core Invariants & Decisions
+- **100% Integer Minor Units**: To eliminate IEEE 754 float drift (`0.1 + 0.2 = 0.30000000000000004`), every monetary value is parsed, calculated, and exported strictly in integer minor units (`amountCents`).
+- **Collision-Safe Fee Deductions**: Intermediary bank wire fees (e.g. €15 deduction on a €1,000 wire) are tracked explicitly via `feeDeductionCents` in the audit trail. When multiple invoices qualify for the same delta, matches are safely demoted to `REVIEW_NEEDED` instead of naively auto-confirming.
+- **Deterministic Over Heuristic**: Tokenization and reference regex extraction always run before fuzzy fallbacks. Jaro-Winkler distance is strictly reserved for typo-tolerance in sanitized remittance strings.
+
+### What `recon-engine` Is NOT (Current Limitations & Non-Goals)
+- **Not an Aggregated 1:N Card Settlement Engine**: Currently optimized for 1:1 B2B invoice-to-transfer matching. Multi-transaction payout splits (1 payout closing 400 micro-orders) are on the upcoming roadmap.
+- **In-Memory Batch Architecture**: Designed for sub-second parsing of standard daily/monthly bank files (<50,000 transactions / ~50 MB). Massive multi-gigabyte XML ledger exports require external chunking.
+- **General Ledger Agnostic**: The engine outputs structured audit-trail JSON with status, match confidence, and fee delta. It does not enforce double-entry chart-of-accounts postings inside the engine itself.
 
 ---
 

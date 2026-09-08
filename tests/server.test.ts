@@ -76,4 +76,44 @@ describe('HTTP API Server (Elysia)', () => {
     const body: any = await res.json();
     expect(body.error).toBeDefined();
   });
+
+  it('strictly validates invoices array against NormalizedInvoiceSchema', async () => {
+    const stmtCsv = `Completed Date,Description,Amount,Fee,Currency,State,Balance,Payer,Beneficiary,Reference\n2024-09-01 10:00:00,Payment,1500.00,0.00,EUR,COMPLETED,1500.00,Acme Corp GmbH,,INV-2024-001`;
+
+    // Malformed invoice missing required fields: amountCents, invoiceNumber, currency, issueDate
+    const invalidInvoices = [
+      {
+        id: 'inv_broken',
+        customerName: 'Acme Corp',
+      },
+    ];
+
+    const res = await app.handle(
+      new Request('http://localhost/v1/match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          statement: stmtCsv,
+          invoices: invalidInvoices,
+        }),
+      })
+    );
+
+    expect(res.status).toBe(400);
+    const body: any = await res.json();
+    expect(body.error).toBeDefined();
+  });
+
+  it('rejects empty or missing parameters in POST /v1/match', async () => {
+    const res = await app.handle(
+      new Request('http://localhost/v1/match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ statement: '' }),
+      })
+    );
+    expect(res.status).toBe(400);
+    const body: any = await res.json();
+    expect(body.error).toBeDefined();
+  });
 });

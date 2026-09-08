@@ -3,7 +3,23 @@
  * optimized for financial remittance and invoice matching.
  */
 
-import { cleanCompanyName, extractInvoiceCandidates, normalizeRemittance } from './text.js';
+import { cleanCompanyName, extractInvoiceCandidates, normalizeRemittance, stripInvoicePrefix } from './text.js';
+
+/**
+ * Calculates similarity between two company/counterparty names [0.0, 1.0].
+ * Cleans corporate suffixes and punctuation, and avoids the high-floor issue of standard Jaro on short strings.
+ */
+export function computeCompanySimilarity(name1: string | undefined, name2: string | undefined): number {
+  if (!name1 || !name2) return 0;
+  const c1 = cleanCompanyName(name1);
+  const c2 = cleanCompanyName(name2);
+  if (!c1 || !c2) return 0;
+  if (c1 === c2 || c1.includes(c2) || c2.includes(c1)) return 1.0;
+
+  const jw = jaroWinklerSimilarity(c1, c2);
+  const lev = levenshteinSimilarity(c1, c2);
+  return Math.min(jw, (jw + lev) / 2);
+}
 
 /**
  * Calculates standard Jaro similarity between two strings.
@@ -132,6 +148,16 @@ function compareInvoiceTokens(candidate: string, invoiceNum: string): number {
   const inv = invoiceNum.toLowerCase().trim();
   if (c === inv) return 1.0;
 
+  // Isolate unique numeric or alphanumeric parts (stripping INV-, INV/, INV-2024-, RECH-, etc.)
+  const cIsolated = stripInvoicePrefix(c).toLowerCase();
+  const invIsolated = stripInvoicePrefix(inv).toLowerCase();
+
+  // If both have isolated parts, compare the isolated unique identifiers directly
+  if (cIsolated && invIsolated) {
+    if (cIsolated === invIsolated) return 1.0;
+    return jaroWinklerSimilarity(cIsolated, invIsolated);
+  }
+
   const baseScore = jaroWinklerSimilarity(c, inv);
   if (baseScore < 0.75) return baseScore;
 
@@ -190,21 +216,9 @@ export function scoreRemittanceMatch(
   let companyConflicting = false;
   let companyCompatScore = 0;
   if (counterpartyName && customerName) {
-    const cleanCounterparty = cleanCompanyName(counterpartyName);
-    const cleanCustomer = cleanCompanyName(customerName);
-
-    if (cleanCounterparty && cleanCustomer) {
-      if (
-        cleanCounterparty.includes(cleanCustomer) ||
-        cleanCustomer.includes(cleanCounterparty)
-      ) {
-        companyCompatScore = 0.95;
-      } else {
-        companyCompatScore = jaroWinklerSimilarity(cleanCounterparty, cleanCustomer);
-      }
-      if (companyCompatScore < 0.45) {
-        companyConflicting = true;
-      }
+    companyCompatScore = computeCompanySimilarity(counterpartyName, customerName);
+    if (companyCompatScore < 0.40) {
+      companyConflicting = true;
     }
   }
 
@@ -257,26 +271,14 @@ export function scoreRemittanceMatch(
   // 4. Counterparty name vs Customer name similarity
   let nameScore = 0;
   if (counterpartyName && customerName) {
-    const cleanCounterparty = cleanCompanyName(counterpartyName);
-    const cleanCustomer = cleanCompanyName(customerName);
-
-    if (cleanCounterparty && cleanCustomer) {
-      if (
-        cleanCounterparty.includes(cleanCustomer) ||
-        cleanCustomer.includes(cleanCounterparty)
-      ) {
-        nameScore = 0.95;
-      } else {
-        nameScore = jaroWinklerSimilarity(cleanCounterparty, cleanCustomer);
-      }
-    }
+    nameScore = computeCompanySimilarity(counterpartyName, customerName);
   }
 
   // Company-only match (invoice reference or token completely absent)
   // Strictly forbid high-confidence match on company alone; demote score to <= 0.70 and require review
   if (nameScore >= 0.80) {
     return {
-      score: Math.min(0.70, nameScore * 0.70),
+      score: 0.70,
       reason: `Company name matched ('${counterpartyName}' vs '${customerName}'), but invoice reference was missing`,
       hasInvoiceReference: false,
     };

@@ -3,6 +3,17 @@
  * Always operates on integer minor units (cents) to avoid IEEE 754 floating point issues.
  */
 
+export class InvalidAmountError extends Error {
+  public readonly rawAmount: unknown;
+
+  constructor(rawAmount: unknown, message?: string) {
+    super(message ?? `Invalid amount: ${JSON.stringify(rawAmount)}`);
+    this.name = 'InvalidAmountError';
+    this.rawAmount = rawAmount;
+    Object.setPrototypeOf(this, InvalidAmountError.prototype);
+  }
+}
+
 export interface ParsedAmount {
   amountCents: number;
   direction: 'INCOMING' | 'OUTGOING';
@@ -20,76 +31,138 @@ export function parseAmountToCents(
   rawAmount: string | number,
   forcedDirection?: 'INCOMING' | 'OUTGOING'
 ): ParsedAmount {
-  if (typeof rawAmount === 'number') {
-    const isNegative = rawAmount < 0;
-    const absCents = Math.round(Math.abs(rawAmount) * 100);
-    const direction = forcedDirection ?? (isNegative ? 'OUTGOING' : 'INCOMING');
-    return { amountCents: absCents, direction };
+  if (rawAmount === null || rawAmount === undefined) {
+    throw new InvalidAmountError(rawAmount, 'Amount is missing (null or undefined)');
   }
 
-  let cleaned = rawAmount.trim();
-
-  // Check for negative signs or accounting brackets like (100.00) or $ -25.50 or -$25.50
   let isNegative = false;
-  if (cleaned.startsWith('(') && cleaned.endsWith(')')) {
-    isNegative = true;
-    cleaned = cleaned.slice(1, -1).trim();
-  } else if (cleaned.includes('-')) {
-    isNegative = true;
+  let cleaned = '';
+
+  if (typeof rawAmount === 'number') {
+    if (isNaN(rawAmount) || !Number.isFinite(rawAmount)) {
+      throw new InvalidAmountError(rawAmount, `Invalid numeric amount: ${rawAmount}`);
+    }
+    isNegative = rawAmount < 0;
+    cleaned = Math.abs(rawAmount).toString();
+  } else if (typeof rawAmount === 'string') {
+    const rawTrimmed = rawAmount.trim();
+    if (!rawTrimmed) {
+      throw new InvalidAmountError(rawAmount, 'Amount string is empty');
+    }
+
+    // Must contain at least one digit
+    if (!/\d/.test(rawTrimmed)) {
+      throw new InvalidAmountError(rawAmount, `No digits found in amount: "${rawAmount}"`);
+    }
+
+    cleaned = rawTrimmed;
+
+    // Check for negative signs or accounting brackets like (100.00) or $ -25.50 or -$25.50
+    if (cleaned.startsWith('(') && cleaned.endsWith(')')) {
+      isNegative = true;
+      cleaned = cleaned.slice(1, -1).trim();
+    } else if (cleaned.includes('-')) {
+      isNegative = true;
+      cleaned = cleaned.replace(/-/g, '').trim();
+    } else if (cleaned.startsWith('+')) {
+      cleaned = cleaned.slice(1).trim();
+    }
+
+    // Strip currency symbols and letters (e.g. EUR, USD, €, $, £)
+    cleaned = cleaned.replace(/[^\d.,]/g, '').trim();
+  } else {
+    throw new InvalidAmountError(rawAmount, `Unsupported amount type: ${typeof rawAmount}`);
   }
 
-  // Strip currency symbols and letters (e.g. EUR, USD, €, $, £)
-  cleaned = cleaned.replace(/[^\d.,]/g, '').trim();
-
-  if (!cleaned) {
-    return { amountCents: 0, direction: forcedDirection ?? 'INCOMING' };
+  if (!cleaned || !/\d/.test(cleaned)) {
+    throw new InvalidAmountError(rawAmount, `Failed to extract numeric characters from amount: "${rawAmount}"`);
   }
 
-  // Detect decimal separator:
-  // If there is both '.' and ',', the last one is the decimal separator.
-  // E.g., "1.234,56" -> comma is decimal. "1,234.56" -> dot is decimal.
-  // If only ',' is present: if followed by 2 digits at the end (e.g. "12,50"), it's decimal.
-  let normalizedStr = cleaned;
+  let whole = '';
+  let fraction = '';
+
   const lastDot = cleaned.lastIndexOf('.');
   const lastComma = cleaned.lastIndexOf(',');
 
   if (lastDot !== -1 && lastComma !== -1) {
     if (lastComma > lastDot) {
-      // European: 1.234,56 -> remove dots, replace comma with dot
-      normalizedStr = cleaned.replace(/\./g, '').replace(',', '.');
+      // European: 1.234,56 -> comma is decimal separator
+      whole = cleaned.slice(0, lastComma).replace(/\./g, '');
+      fraction = cleaned.slice(lastComma + 1);
     } else {
-      // US/UK: 1,234.56 -> remove commas
-      normalizedStr = cleaned.replace(/,/g, '');
+      // US/UK: 1,234.56 -> dot is decimal separator
+      whole = cleaned.slice(0, lastDot).replace(/,/g, '');
+      fraction = cleaned.slice(lastDot + 1);
     }
   } else if (lastComma !== -1) {
-    // Only comma
-    const parts = cleaned.split(',');
-    if (parts.length === 2 && parts[1].length <= 2) {
-      // Decimal comma: "1250,50" -> "1250.50"
-      normalizedStr = cleaned.replace(',', '.');
+    const commaParts = cleaned.split(',');
+    if (commaParts.length === 2 && commaParts[1].length <= 2) {
+      // Decimal comma: "1250,50"
+      whole = commaParts[0];
+      fraction = commaParts[1];
     } else {
       // Thousands separator: "1,000,000"
-      normalizedStr = cleaned.replace(/,/g, '');
+      whole = cleaned.replace(/,/g, '');
+      fraction = '';
     }
   } else if (lastDot !== -1) {
-    // Only dot
-    const parts = cleaned.split('.');
-    if (parts.length > 2) {
+    const dotParts = cleaned.split('.');
+    if (dotParts.length > 2) {
       // Multiple dots: "1.000.000" -> thousands separator
-      normalizedStr = cleaned.replace(/\./g, '');
+      whole = cleaned.replace(/\./g, '');
+      fraction = '';
+    } else {
+      // Single dot: standard decimal "1250.50" or "1.005"
+      whole = dotParts[0];
+      fraction = dotParts[1] || '';
     }
-    // Else single dot: standard decimal "1250.50"
+  } else {
+    whole = cleaned;
+    fraction = '';
   }
 
-  const floatVal = parseFloat(normalizedStr);
-  if (isNaN(floatVal)) {
-    return { amountCents: 0, direction: forcedDirection ?? 'INCOMING' };
+  whole = whole.replace(/\D/g, '');
+  if (!whole) {
+    whole = '0';
+  }
+  fraction = fraction.replace(/\D/g, '');
+
+  // Round and pad fraction strictly to 2 characters via string arithmetic
+  if (fraction.length === 0) {
+    fraction = '00';
+  } else if (fraction.length === 1) {
+    fraction = fraction + '0';
+  } else if (fraction.length === 2) {
+    // Exactly 2 digits
+  } else {
+    // 3 or more digits: round 3rd digit (half-up)
+    const d1d2 = fraction.slice(0, 2);
+    const d3 = parseInt(fraction[2], 10);
+    if (d3 >= 5) {
+      const centsVal = parseInt(d1d2, 10) + 1;
+      if (centsVal === 100) {
+        whole = (BigInt(whole) + 1n).toString();
+        fraction = '00';
+      } else {
+        fraction = centsVal.toString().padStart(2, '0');
+      }
+    } else {
+      fraction = d1d2;
+    }
   }
 
-  const amountCents = Math.round(Math.abs(floatVal) * 100);
+  const amountCents = parseInt(whole + fraction, 10);
+
+  if (isNaN(amountCents)) {
+    throw new InvalidAmountError(rawAmount, `Calculation resulted in NaN for amount: "${rawAmount}"`);
+  }
+
   const direction = forcedDirection ?? (isNegative ? 'OUTGOING' : 'INCOMING');
 
-  return { amountCents, direction };
+  return {
+    amountCents,
+    direction,
+  };
 }
 
 /**

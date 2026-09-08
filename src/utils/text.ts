@@ -75,6 +75,20 @@ export function cleanCompanyName(name: string): string {
 }
 
 /**
+ * Strips static invoice prefixes (INV-, INV/, INV-2024-, RECH-, RE-, PO-, BILL-, etc.)
+ * to isolate the unique numeric or alphanumeric invoice identifier.
+ */
+export function stripInvoicePrefix(token: string): string {
+  if (!token) return '';
+  return token
+    .replace(/^#+/, '')
+    .replace(/^(?:inv|rech|rechnung|re|bill|po|order|invnr)[-_/#\s]*(?:202[0-9][-_/#\s]*)?/i, '')
+    .replace(/^202[0-9][-_/#\s]*/i, '')
+    .replace(/^[-_/#\s]+/, '')
+    .trim();
+}
+
+/**
  * Extracts potential invoice reference identifiers from unstructured remittance text.
  * Matches patterns like:
  * - "INV-2024-001"
@@ -95,6 +109,10 @@ export function extractInvoiceCandidates(text: string): string[] {
     if (match[1] && match[1].length >= 3) {
       candidates.add(match[1].replace(/[\s/]/g, '-').toUpperCase());
       candidates.add(match[0].replace(/[\s/]/g, '-').toUpperCase());
+      const isolated = stripInvoicePrefix(match[0]);
+      if (isolated && isolated.length >= 2) {
+        candidates.add(isolated.toUpperCase());
+      }
     }
   }
 
@@ -102,12 +120,20 @@ export function extractInvoiceCandidates(text: string): string[] {
   const hashRegex = /#([a-z0-9-_]{3,25})/gi;
   while ((match = hashRegex.exec(text)) !== null) {
     candidates.add(match[1].toUpperCase());
+    const isolated = stripInvoicePrefix(match[1]);
+    if (isolated && isolated.length >= 2) {
+      candidates.add(isolated.toUpperCase());
+    }
   }
 
   // Pattern 3: Common invoice number shapes like 2024-0012, 2024/0012, 1000293
   const numberRegex = /\b(202[0-9][-/_][0-9]{3,8})\b/g;
   while ((match = numberRegex.exec(text)) !== null) {
     candidates.add(match[1].replace(/[/_]/g, '-'));
+    const isolated = stripInvoicePrefix(match[1]);
+    if (isolated && isolated.length >= 2) {
+      candidates.add(isolated.toUpperCase());
+    }
   }
 
   return Array.from(candidates);

@@ -1,12 +1,16 @@
 {
-  "name": "recon-engine",
-  "version": "0.1.0",
+  "name": "@danyayen/recon-engine",
+  "version": "0.2.0",
   "description": "Lightweight open-source bank statement parser and reconciliation engine",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DanyaYen/recon-engine.git"
+  },
   "type": "module",
   "main": "./src/index.ts",
   "bin": {
-    "recon": "./src/cli/index.ts",
-    "recon-engine": "./src/cli/index.ts"
+    "recon-engine": "./dist/cli/index.js",
+    "recon": "./dist/cli/index.js"
   },
   "exports": {
     ".": "./src/index.ts",

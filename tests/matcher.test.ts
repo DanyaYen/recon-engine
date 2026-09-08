@@ -215,6 +215,123 @@ describe('Matching Engine (Deterministic & Fuzzy)', () => {
     expect(report.summary.matchedCount).toBe(1);
     expect(report.summary.unmatchedCount).toBe(1);
   });
+
+  it('marks both transactions as REVIEW_NEEDED when two transactions contend for the same invoice with close scores', () => {
+    const txs: NormalizedTransaction[] = [
+      {
+        id: 'tx_comp_1',
+        bookingDate: '2024-09-02',
+        amountCents: 150000,
+        currency: 'EUR',
+        direction: 'INCOMING',
+        counterpartyName: 'Gamma SAS',
+        reference: 'INV-2024-008 wire',
+        sourceFormat: 'test',
+      },
+      {
+        id: 'tx_comp_2',
+        bookingDate: '2024-09-02',
+        amountCents: 150000,
+        currency: 'EUR',
+        direction: 'INCOMING',
+        counterpartyName: 'Gamma SAS',
+        reference: 'INV-2024-009 wire',
+        sourceFormat: 'test',
+      },
+    ];
+
+    const report = reconcile(txs, sampleInvoices);
+    expect(report.summary.reviewNeededCount).toBe(2);
+    expect(report.summary.matchedCount).toBe(0);
+    expect(report.matches.every((m) => m.status === 'REVIEW_NEEDED')).toBe(true);
+    expect(report.matches[0].invoice?.invoiceNumber).toBe('INV-2024-003');
+    expect(report.matches[1].invoice?.invoiceNumber).toBe('INV-2024-003');
+    expect(report.matches[0].discrepancies[0]).toContain('Ambiguous match: multiple transactions');
+  });
+
+  it('prevents greedy collision when multiple invoices qualify within fee tolerance window', () => {
+    // 2 identical invoices of €1,000.00
+    const duplicateInvoices: NormalizedInvoice[] = [
+      {
+        id: 'inv_dup_1',
+        invoiceNumber: 'INV-2024-COLL-1',
+        amountCents: 100000,
+        currency: 'EUR',
+        issueDate: '2024-09-01',
+        status: 'OPEN',
+        customerName: 'Acme GmbH',
+      },
+      {
+        id: 'inv_dup_2',
+        invoiceNumber: 'INV-2024-COLL-2',
+        amountCents: 100000,
+        currency: 'EUR',
+        issueDate: '2024-09-01',
+        status: 'OPEN',
+        customerName: 'Acme GmbH',
+      },
+    ];
+
+    // Transaction for €985.00 (€15 fee deducted)
+    const txs: NormalizedTransaction[] = [
+      {
+        id: 'tx_coll',
+        bookingDate: '2024-09-02',
+        amountCents: 98500,
+        currency: 'EUR',
+        direction: 'INCOMING',
+        counterpartyName: 'Acme GmbH',
+        reference: 'Payment Acme invoice',
+        sourceFormat: 'test',
+      },
+    ];
+
+    const report = reconcile(txs, duplicateInvoices, { feeToleranceCents: 2500 });
+    expect(report.matches.length).toBe(1);
+
+    const m = report.matches[0];
+    // Must NOT be greedily auto-matched (MATCHED)
+    expect(m.status).toBe('REVIEW_NEEDED');
+    expect(m.level).toBe('FEE_TOLERANCE');
+    expect(m.confidenceScore).toBe(0.65);
+    expect(m.feeDeductionCents).toBe(1500);
+    expect(m.discrepancies[0]).toContain(
+      'Ambiguous match: multiple invoices qualify within fee tolerance window'
+    );
+  });
+
+  it('explicitly records feeDeductionCents in match result when wire fee is deducted', () => {
+    const singleInv: NormalizedInvoice[] = [
+      {
+        id: 'inv_fee',
+        invoiceNumber: 'INV-2024-FEE',
+        amountCents: 100000, // €1,000.00
+        currency: 'EUR',
+        issueDate: '2024-09-01',
+        status: 'OPEN',
+        customerName: 'Acme GmbH',
+      },
+    ];
+
+    const txs: NormalizedTransaction[] = [
+      {
+        id: 'tx_fee',
+        bookingDate: '2024-09-02',
+        amountCents: 98500, // €985.00 (€15 fee)
+        currency: 'EUR',
+        direction: 'INCOMING',
+        counterpartyName: 'Acme GmbH',
+        reference: 'INV-2024-FEE net payment',
+        sourceFormat: 'test',
+      },
+    ];
+
+    const report = reconcile(txs, singleInv, { feeToleranceCents: 2500 });
+    expect(report.matches.length).toBe(1);
+    const m = report.matches[0];
+    expect(m.status).toBe('REVIEW_NEEDED');
+    expect(m.feeDeductionCents).toBe(1500); // 100000 - 98500 = 1500 cents
+  });
 });
 
 describe('CLI recon match command', () => {

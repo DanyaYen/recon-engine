@@ -56,10 +56,16 @@ program
       const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
 
       if (options.json) {
-        const output = options.pretty
-          ? JSON.stringify(result, null, 2)
-          : JSON.stringify(result);
-        console.log(output);
+        const output = {
+          parserId: result.parserId,
+          parserName: result.parserName,
+          count: result.transactions.length,
+          transactions: result.transactions,
+        };
+        const outputStr = options.pretty
+          ? JSON.stringify(output, null, 2)
+          : JSON.stringify(output);
+        console.log(outputStr);
         return;
       }
 
@@ -157,6 +163,7 @@ program
   .option('-d, --date-tolerance <days>', 'Date tolerance window in days (default: 2)', '2')
   .option('--fee-tolerance <cents>', 'Max allowed wire fee discrepancy in cents (default: 2500 / 25.00 EUR)', '2500')
   .option('-y, --yes', 'Automatically confirm all suggested REVIEW_NEEDED matches without prompting')
+  .option('--force', 'Force auto-confirmation of risky counterparty matches when used with --yes')
   .option('--non-interactive', 'Do not run interactive prompts; leave REVIEW_NEEDED items as is')
   .option('-o, --output <file>', 'Save reconciliation audit report to JSON file')
   .option('--json', 'Output full reconciliation report directly as JSON')
@@ -214,8 +221,19 @@ program
       if (options.yes) {
         // Auto-approve unambiguous REVIEW_NEEDED suggestions
         // Ambiguous matches (multiple candidates within fee tolerance) remain REVIEW_NEEDED for safety
+        // Risky counterparty matches require explicit --force
         for (const m of reviewMatches) {
           if (m.discrepancies.some((d) => d.includes('Ambiguous match'))) {
+            continue;
+          }
+          const isRisky =
+            Boolean(m.requiresForce) ||
+            m.discrepancies.some(
+              (d) =>
+                d.includes('Risky counterparty mismatch') ||
+                d.includes('requires explicit --force')
+            );
+          if (isRisky && !options.force) {
             continue;
           }
           m.status = 'MATCHED';

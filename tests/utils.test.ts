@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
-import { parseAmountToCents, formatCents } from '../src/utils/money.js';
-import { parseBankDate } from '../src/utils/date.js';
+import { parseAmountToCents, formatCents, InvalidAmountError } from '../src/utils/money.js';
+import { parseBankDate, InvalidDateError, getDayDifference } from '../src/utils/date.js';
 import { parseCsv } from '../src/utils/csv.js';
 import { cleanCompanyName, extractInvoiceCandidates, normalizeRemittance } from '../src/utils/text.js';
 
@@ -22,6 +22,36 @@ describe('Money utilities', () => {
     expect(parseAmountToCents('$ -25.50')).toEqual({ amountCents: 2550, direction: 'OUTGOING' });
     expect(parseAmountToCents(123.45)).toEqual({ amountCents: 12345, direction: 'INCOMING' });
     expect(parseAmountToCents(-80.0)).toEqual({ amountCents: 8000, direction: 'OUTGOING' });
+  });
+
+  it('handles boundary amounts and rounding edge cases without floating point inaccuracies', () => {
+    // Stress tests on boundary amounts specified in code review
+    expect(parseAmountToCents('1.005')).toEqual({ amountCents: 101, direction: 'INCOMING' });
+    expect(parseAmountToCents('29.99')).toEqual({ amountCents: 2999, direction: 'INCOMING' });
+    expect(parseAmountToCents('0.07')).toEqual({ amountCents: 7, direction: 'INCOMING' });
+    expect(parseAmountToCents('1234.567')).toEqual({ amountCents: 123457, direction: 'INCOMING' });
+
+    // Additional boundary and rounding edge cases
+    expect(parseAmountToCents('0.004')).toEqual({ amountCents: 0, direction: 'INCOMING' });
+    expect(parseAmountToCents('0.005')).toEqual({ amountCents: 1, direction: 'INCOMING' });
+    expect(parseAmountToCents('0.999')).toEqual({ amountCents: 100, direction: 'INCOMING' });
+    expect(parseAmountToCents('-1.005')).toEqual({ amountCents: 101, direction: 'OUTGOING' });
+    expect(parseAmountToCents('$ 1,234.567')).toEqual({ amountCents: 123457, direction: 'INCOMING' });
+  });
+
+  it('throws InvalidAmountError on invalid amounts instead of returning 0', () => {
+    expect(() => parseAmountToCents('')).toThrow(InvalidAmountError);
+    expect(() => parseAmountToCents('   ')).toThrow(InvalidAmountError);
+    expect(() => parseAmountToCents('INVALID')).toThrow(InvalidAmountError);
+    expect(() => parseAmountToCents('N/A')).toThrow(InvalidAmountError);
+    expect(() => parseAmountToCents(NaN)).toThrow(InvalidAmountError);
+
+    try {
+      parseAmountToCents('INVALID_AMOUNT');
+    } catch (err) {
+      expect(err instanceof InvalidAmountError).toBe(true);
+      expect((err as InvalidAmountError).rawAmount).toBe('INVALID_AMOUNT');
+    }
   });
 
   it('formats cents into readable strings', () => {
@@ -49,6 +79,47 @@ describe('Date utilities', () => {
   it('parses SWIFT MT940 YYMMDD', () => {
     expect(parseBankDate('240901')).toBe('2024-09-01');
     expect(parseBankDate('991231')).toBe('1999-12-31');
+  });
+
+  it('correctly handles leap year dates', () => {
+    expect(parseBankDate('2024-02-29')).toBe('2024-02-29');
+    expect(() => parseBankDate('2023-02-29')).toThrow(InvalidDateError);
+  });
+
+  it('rejects invalid dates like 2026-99-99 and broken dates without falling back to today', () => {
+    expect(() => parseBankDate('2026-99-99')).toThrow(InvalidDateError);
+    expect(() => parseBankDate('31.02.2024')).toThrow(InvalidDateError);
+    expect(() => parseBankDate('2024-04-31')).toThrow(InvalidDateError);
+    expect(() => parseBankDate('corrupt-date-string')).toThrow(InvalidDateError);
+    expect(() => parseBankDate('')).toThrow(InvalidDateError);
+    expect(() => parseBankDate(undefined)).toThrow(InvalidDateError);
+
+    try {
+      parseBankDate('2026-99-99');
+    } catch (err) {
+      expect(err instanceof InvalidDateError).toBe(true);
+      expect((err as InvalidDateError).rawDate).toBe('2026-99-99');
+    }
+  });
+
+  describe('getDayDifference', () => {
+    it('calculates calendar day differences in UTC without timezone drift', () => {
+      expect(getDayDifference('2024-09-01', '2024-09-01')).toBe(0);
+      expect(getDayDifference('2024-09-01', '2024-09-03')).toBe(2);
+      expect(getDayDifference('2024-09-03', '2024-09-01')).toBe(2);
+      expect(getDayDifference('2024-01-01', '2024-01-31')).toBe(30);
+    });
+
+    it('correctly handles leap years and month transitions', () => {
+      expect(getDayDifference('2024-02-28', '2024-03-01')).toBe(2); // 2024 is leap year (Feb 29)
+      expect(getDayDifference('2023-02-28', '2023-03-01')).toBe(1); // 2023 is non-leap year
+    });
+
+    it('avoids daylight saving time (DST) shifts', () => {
+      // European spring forward (March) and fall back (October)
+      expect(getDayDifference('2024-03-30', '2024-04-01')).toBe(2);
+      expect(getDayDifference('2024-10-26', '2024-10-28')).toBe(2);
+    });
   });
 });
 
