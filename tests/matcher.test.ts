@@ -451,4 +451,10 @@ describe('CLI recon match command', () => {
     expect(report.summary.reviewNeededCount).toBe(0);
     expect(report.summary.matchedCount).toBeGreaterThanOrEqual(2);
   });
+
+  it('supports --force flag in CLI match command for risky counterparty confirmation', () => {
+    const res = spawnSync('bun', [CLI_PATH, 'match', '--help'], { encoding: 'utf-8' });
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain('--force');
+  });
 });

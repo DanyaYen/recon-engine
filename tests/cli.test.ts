@@ -19,6 +19,7 @@ describe('CLI Commands', () => {
 
     const data = JSON.parse(res.stdout);
     expect(data.parserId).toBe('revolut-csv');
+    expect(data.count).toBe(5);
     expect(data.transactions.length).toBe(5);
     expect(data.transactions[0].amountCents).toBe(150000);
   });
