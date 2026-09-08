@@ -57,30 +57,30 @@ No installation required. Run directly with Bun:
 ### 1. Match Bank Statements to Invoices
 ```bash
 # Auto-detect format and run interactive matching
-bunx recon-engine match --statement bank-statement.csv --invoices invoices.json
+bunx @danyayen/recon-engine match --statement bank-statement.csv --invoices invoices.json
 
 # Auto-confirm all high-confidence matches (headless / CI)
-bunx recon-engine match --statement bank.xml --invoices invoices.csv --yes --json
+bunx @danyayen/recon-engine match --statement bank.xml --invoices invoices.csv --yes --json
 ```
 
 ### 2. Parse Bank Statements Only
 ```bash
 # Auto-detects CAMT.053 XML, SWIFT MT940, Revolut, or Stripe
-bunx recon-engine parse statement.xml
+bunx @danyayen/recon-engine parse statement.xml
 
 # Output clean JSON for piping into jq or downstream services
-bunx recon-engine parse statement.csv --json | jq .
+bunx @danyayen/recon-engine parse statement.csv --json | jq .
 ```
 
 ### 3. Generate Mock Data for Testing
 ```bash
 # Generate 50 realistic synthetic bank transactions with wire noise
-bunx recon-engine mock --format camt053 --count 50 --noise 0.2 -o mock.xml
+bunx @danyayen/recon-engine mock --format camt053 --count 50 --noise 0.2 -o mock.xml
 ```
 
 ### 4. Run Headless HTTP Microservice
 ```bash
-bunx recon-engine serve --port 3000
+bunx @danyayen/recon-engine serve --port 3000
 ```
 
 ---
@@ -92,6 +92,7 @@ bunx recon-engine serve --port 3000
 - Feed [`AGENT.md`](./AGENT.md) or [`llms.txt`](./llms.txt) directly into your agent's context.
 - Always pass `--json --non-interactive` (or `--yes`) flags to avoid interactive terminal prompts.
 - All monetary amounts strictly use integer minor units (`amountCents: number`) to prevent IEEE 754 float precision errors.
+- Every normalized transaction includes a `raw?: Record<string, unknown>` diagnostic payload preserving the original unparsed row/fields for auditing and tracing.
 
 ---
 
@@ -102,7 +103,7 @@ bunx recon-engine serve --port 3000
 import subprocess, json
 
 result = subprocess.run(
-    ["bunx", "recon-engine", "match", "--statement", "bank.xml", "--invoices", "invoices.json", "--json", "--yes"],
+    ["bunx", "@danyayen/recon-engine", "match", "--statement", "bank.xml", "--invoices", "invoices.json", "--json", "--yes"],
     capture_output=True, text=True, check=True
 )
 report = json.loads(result.stdout)

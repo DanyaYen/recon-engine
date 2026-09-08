@@ -8,9 +8,9 @@
 
 ## CLI Invocation for Agents
 - Always use headless non-interactive mode:
-  bunx recon-engine match --statement <file> --invoices <file> --json --yes
+  bunx @danyayen/recon-engine match --statement <file> --invoices <file> --json --yes
 - Parse statement to stdout JSON:
-  bunx recon-engine parse <file> --json
+  bunx @danyayen/recon-engine parse <file> --json
 
 ## Schema Specifications
 - Full specs and agent execution protocols available in AGENT.md
