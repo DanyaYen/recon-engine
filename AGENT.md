@@ -9,7 +9,7 @@ This document provides strict integration instructions, command interfaces, sche
 1. **Headless Execution Only**:
    Always supply `--json` and `--yes` (or `--non-interactive`) when invoking CLI commands via subshells or background tasks. Never trigger interactive prompts.
    ```bash
-   bunx recon-engine match --statement <file> --invoices <file> --json --yes
+   bunx @danyayen/recon-engine match --statement <file> --invoices <file> --json --yes
    ```
 
 2. **Zero Float Drift Guarantee**:
@@ -24,7 +24,7 @@ This document provides strict integration instructions, command interfaces, sche
 
 ### Parse a Statement
 ```bash
-bunx recon-engine parse <statement_path> --json
+bunx @danyayen/recon-engine parse <statement_path> --json
 ```
 **Output format:**
 ```json
@@ -49,21 +49,22 @@ bunx recon-engine parse <statement_path> --json
 
 ### Reconcile Statement with Invoices
 ```bash
-bunx recon-engine match --statement <statement_path> --invoices <invoices_path> --json --yes
+bunx @danyayen/recon-engine match --statement <statement_path> --invoices <invoices_path> --json --yes
 ```
 **Optional Flags:**
 - `--date-tolerance <days>`: Allowed booking date offset (default: `2`).
 - `--fee-tolerance <cents>`: Allowed wire fee underpayment deduction in cents (default: `2500` = €25.00).
+- `--force`: Force auto-confirmation of risky counterparty matches when used with `--yes`.
 - `--output <file.json>`: Write audit report to file in addition to stdout.
 
 ### Generate Synthetic Test Statements
 ```bash
-bunx recon-engine mock --format <camt053|mt940|revolut|generic> --count <n> --noise <0.0-1.0> -o <output_file>
+bunx @danyayen/recon-engine mock --format <camt053|mt940|revolut|generic> --count <n> --noise <0.0-1.0> -o <output_file>
 ```
 
 ### Run HTTP Microservice
 ```bash
-bunx recon-engine serve --port 3000
+bunx @danyayen/recon-engine serve --port 3000
 ```
 
 ---
@@ -85,6 +86,7 @@ interface NormalizedTransaction {
   reference?: string;              // Remittance text or invoice candidate
   bankTransactionId?: string;      // EndToEndId or SWIFT reference
   sourceFormat: string;            // camt053, mt940, revolut-csv, etc.
+  raw?: Record<string, unknown>;   // Diagnostic payload: original parsed row/fields for auditing
 }
 ```
 
