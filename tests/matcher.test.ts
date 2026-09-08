@@ -45,6 +45,50 @@ describe('Invoices Loader', () => {
     expect(invoices[0].invoiceNumber).toBe('INV-2024-001');
     expect(invoices[0].amountCents).toBe(150000);
   });
+
+  it('fails with process.exit(1) on invalid amountCents (float or string) in JSON instead of falling back to zero invoice', () => {
+    const invalidFloatJson = JSON.stringify([
+      {
+        id: 'inv_invalid_1',
+        invoiceNumber: 'INV-2024-999',
+        amountCents: 1500.5,
+        currency: 'EUR',
+        issueDate: '2024-09-01',
+        customerName: 'Acme Corp',
+      },
+    ]);
+    const resFloat = spawnSync(
+      'bun',
+      [
+        '-e',
+        `import { loadInvoices } from './src/matcher/invoices.js'; await loadInvoices(${JSON.stringify(invalidFloatJson)});`,
+      ],
+      { encoding: 'utf-8' }
+    );
+    expect(resFloat.status).toBe(1);
+    expect(resFloat.stderr).toContain('Validation error in invoices JSON');
+
+    const invalidStringJson = JSON.stringify([
+      {
+        id: 'inv_invalid_2',
+        invoiceNumber: 'INV-2024-999',
+        amountCents: '150000',
+        currency: 'EUR',
+        issueDate: '2024-09-01',
+        customerName: 'Acme Corp',
+      },
+    ]);
+    const resString = spawnSync(
+      'bun',
+      [
+        '-e',
+        `import { loadInvoices } from './src/matcher/invoices.js'; await loadInvoices(${JSON.stringify(invalidStringJson)});`,
+      ],
+      { encoding: 'utf-8' }
+    );
+    expect(resString.status).toBe(1);
+    expect(resString.stderr).toContain('Validation error in invoices JSON');
+  });
 });
 
 describe('Matching Engine (Deterministic & Fuzzy)', () => {
@@ -331,6 +375,37 @@ describe('Matching Engine (Deterministic & Fuzzy)', () => {
     const m = report.matches[0];
     expect(m.status).toBe('REVIEW_NEEDED');
     expect(m.feeDeductionCents).toBe(1500); // 100000 - 98500 = 1500 cents
+  });
+
+  it('does not assign MATCHED status to transaction INV-2024-1006 (Zalando) against invoice INV-2024-501 (Siemens)', () => {
+    const txs: NormalizedTransaction[] = [
+      {
+        id: 'tx_zalando',
+        bookingDate: '2024-09-01',
+        amountCents: 250000,
+        currency: 'EUR',
+        direction: 'INCOMING',
+        counterpartyName: 'Zalando Payments GmbH',
+        reference: 'INV-2024-1006 Zalando Order',
+        sourceFormat: 'test',
+      },
+    ];
+
+    const invs: NormalizedInvoice[] = [
+      {
+        id: 'inv_siemens_501',
+        invoiceNumber: 'INV-2024-501',
+        amountCents: 250000,
+        currency: 'EUR',
+        issueDate: '2024-09-01',
+        status: 'OPEN',
+        customerName: 'Siemens Digital GmbH',
+      },
+    ];
+
+    const report = reconcile(txs, invs);
+    expect(report.matches[0].status).not.toBe('MATCHED');
+    expect(report.summary.matchedCount).toBe(0);
   });
 });
 
