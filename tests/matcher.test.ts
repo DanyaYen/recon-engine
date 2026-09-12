@@ -551,6 +551,55 @@ describe('Matching Engine (Deterministic & Fuzzy)', () => {
     expect(report.summary.matchedCount + report.summary.reviewNeededCount).toBe(2000);
     expect(durationMs).toBeLessThan(250);
   });
+
+  it('benchmark: matches 5,000 transactions against 5,000 invoices in < 300ms', () => {
+    const invoices: NormalizedInvoice[] = [];
+    const transactions: NormalizedTransaction[] = [];
+
+    for (let i = 0; i < 5000; i++) {
+      const invNum = `INV-2024-${String(i).padStart(5, '0')}`;
+      const amountCents = 10000 + (i % 250) * 100;
+      invoices.push({
+        id: `inv_${i}`,
+        invoiceNumber: invNum,
+        amountCents,
+        currency: 'EUR',
+        issueDate: '2024-09-01',
+        status: 'OPEN',
+        customerName: `Customer ${i % 50} GmbH`,
+        customerIban: `DE893704004405320${String(i % 50).padStart(5, '0')}`,
+      });
+
+      let txAmountCents = amountCents;
+      let reference = `Payment for ${invNum}`;
+      if (i % 10 === 0) {
+        txAmountCents = Math.max(1000, amountCents - 1500);
+        reference = `Net payment for invoice ${invNum}`;
+      } else if (i % 7 === 0) {
+        reference = `Invoice ${invNum.replace('-', ' ')} transfer`;
+      }
+
+      transactions.push({
+        id: `tx_${i}`,
+        bookingDate: '2024-09-02',
+        amountCents: txAmountCents,
+        currency: 'EUR',
+        direction: 'INCOMING',
+        counterpartyName: `Customer ${i % 50} GmbH`,
+        reference,
+        sourceFormat: 'test',
+      });
+    }
+
+    const start = performance.now();
+    const report = reconcile(transactions, invoices);
+    const durationMs = performance.now() - start;
+
+    expect(report.summary.totalTransactions).toBe(5000);
+    expect(report.summary.totalInvoices).toBe(5000);
+    expect(report.summary.matchedCount + report.summary.reviewNeededCount).toBe(5000);
+    expect(durationMs).toBeLessThan(300);
+  });
 });
 
 describe('CLI recon match command', () => {

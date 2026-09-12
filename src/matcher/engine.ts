@@ -50,6 +50,34 @@ function hasExactInvoiceRef(tx: NormalizedTransaction, inv: NormalizedInvoice): 
   );
 }
 
+function extractReferenceKeys(tx: NormalizedTransaction): string[] {
+  const keys: string[] = [];
+  const add = (k: string | undefined) => {
+    if (!k) return;
+    const c = k.trim().toLowerCase();
+    if (c.length < 3) return;
+    keys.push(c);
+    const a = c.replace(/[^a-z0-9]/g, '');
+    if (a.length >= 3 && a !== c) keys.push(a);
+  };
+
+  if (tx.bankTransactionId) add(tx.bankTransactionId);
+  if (tx.reference) {
+    add(tx.reference);
+    const parts = tx.reference.split(/[\s,;/:|()]+/);
+    for (let i = 0; i < parts.length; i++) {
+      add(parts[i]);
+    }
+    const m = tx.reference.match(/[a-z]{2,}[\s_-]*\d+(?:[\s_-]*\d+)*/gi);
+    if (m) {
+      for (let i = 0; i < m.length; i++) {
+        add(m[i]);
+      }
+    }
+  }
+  return keys;
+}
+
 function findInvoicesInAmountRange(
   sortedInvoices: NormalizedInvoice[],
   minAmount: number,
@@ -120,13 +148,42 @@ export function reconcile(
   const matches: MatchResult[] = [];
 
   // =========================================================================
-  // STAGE 1: EXACT MATCH (O(1) Bucket Indexing)
-  // Pre-index invoices into Maps keyed by amountCents and referenceId
+  // INDEXING: Invoices Pre-indexing
+  // - exact reference index: Map<normalizedReference, NormalizedInvoice | 'AMBIGUOUS'>
+  // - bucket map for amounts: Map<currency_amountCents, NormalizedInvoice[]>
   // =========================================================================
+  const exactRefIndex = new Map<string, NormalizedInvoice | 'AMBIGUOUS'>();
   const invoicesByAmount = new Map<string, NormalizedInvoice[]>();
-  const invoicesByRefId = new Map<string, NormalizedInvoice>();
+
+  function registerRef(key: string | undefined, inv: NormalizedInvoice) {
+    if (!key) return;
+    const clean = key.trim().toLowerCase();
+    if (clean.length < 3) return;
+
+    const add = (k: string) => {
+      const existing = exactRefIndex.get(k);
+      if (!existing) {
+        exactRefIndex.set(k, inv);
+      } else if (existing !== 'AMBIGUOUS' && existing.id !== inv.id) {
+        exactRefIndex.set(k, 'AMBIGUOUS');
+      }
+    };
+
+    add(clean);
+    const alphaNum = clean.replace(/[^a-z0-9]/g, '');
+    if (alphaNum.length >= 3 && alphaNum !== clean) {
+      add(alphaNum);
+    }
+    const isolated = stripInvoicePrefix(clean).replace(/[^a-z0-9]/g, '');
+    if (isolated.length >= 4 && isolated !== alphaNum) {
+      add(isolated);
+    }
+  }
 
   for (const inv of invoices) {
+    registerRef(inv.invoiceNumber, inv);
+    registerRef(inv.id, inv);
+
     const key = `${inv.currency}:${inv.amountCents}`;
     const list = invoicesByAmount.get(key);
     if (list) {
@@ -134,33 +191,29 @@ export function reconcile(
     } else {
       invoicesByAmount.set(key, [inv]);
     }
-
-    if (inv.invoiceNumber) {
-      const cleanNum = inv.invoiceNumber.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (cleanNum.length >= 3 && !invoicesByRefId.has(cleanNum)) {
-        invoicesByRefId.set(cleanNum, inv);
-      }
-    }
-    if (inv.id) {
-      const cleanId = inv.id.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (cleanId.length >= 3 && !invoicesByRefId.has(cleanId)) {
-        invoicesByRefId.set(cleanId, inv);
-      }
-    }
   }
 
+  // =========================================================================
+  // STAGE 1: EXACT REFERENCE MATCH (O(1) per transaction)
+  // If reference matches, claim immediately.
+  // =========================================================================
   for (const tx of incomingTxs) {
-    const candidates = invoicesByAmount.get(`${tx.currency}:${tx.amountCents}`);
-    if (!candidates || candidates.length === 0) continue;
+    const keys = extractReferenceKeys(tx);
+    for (const key of keys) {
+      const inv = exactRefIndex.get(key);
+      if (!inv || inv === 'AMBIGUOUS' || matchedInvoiceIds.has(inv.id)) {
+        continue;
+      }
 
-    for (const inv of candidates) {
-      if (matchedInvoiceIds.has(inv.id)) continue;
+      if (tx.currency !== inv.currency || tx.amountCents !== inv.amountCents) {
+        continue;
+      }
 
       const dayDiffIssue = getDayDifference(tx.bookingDate, inv.issueDate);
       const dayDiffDue = inv.dueDate ? getDayDifference(tx.bookingDate, inv.dueDate) : Infinity;
       const dayDiff = Math.min(dayDiffIssue, dayDiffDue);
 
-      if (dayDiff <= dateTolerance && hasExactInvoiceRef(tx, inv)) {
+      if (dayDiff <= dateTolerance) {
         matchedTxIds.add(tx.id);
         matchedInvoiceIds.add(inv.id);
         matches.push({
@@ -178,9 +231,10 @@ export function reconcile(
   }
 
   // =========================================================================
-  // STAGE 2: FUZZY CANDIDATES (Restricted window & excluded matched invoices)
+  // STAGE 2: EXACT AMOUNT + DATE BUCKET MATCH &
+  // STAGE 3: FUZZY CANDIDATES (Restricted window & excluded matched invoices)
   // Date tolerance: +/- 3 days from dateTolerance
-  // Amount tolerance: +/- 2% (or exact amount if fee tolerance disabled)
+  // Amount tolerance: +/- feeTolerance
   // =========================================================================
   const remainingTxs = incomingTxs.filter((tx) => !matchedTxIds.has(tx.id));
   const remainingInvoices = invoices.filter((inv) => !matchedInvoiceIds.has(inv.id));
@@ -189,7 +243,7 @@ export function reconcile(
     // Index remaining invoices by currency:amountCents for O(1) exact amount lookup
     const remainingByAmount = new Map<string, NormalizedInvoice[]>();
     // Group remaining invoices by currency sorted by amountCents for range lookups
-    const sortedByCurrency = new Map<string, NormalizedInvoice[]>();
+    const remainingSortedByCurrency = new Map<string, NormalizedInvoice[]>();
 
     for (const inv of remainingInvoices) {
       const key = `${inv.currency}:${inv.amountCents}`;
@@ -200,15 +254,15 @@ export function reconcile(
         remainingByAmount.set(key, [inv]);
       }
 
-      const cList = sortedByCurrency.get(inv.currency);
+      const cList = remainingSortedByCurrency.get(inv.currency);
       if (cList) {
         cList.push(inv);
       } else {
-        sortedByCurrency.set(inv.currency, [inv]);
+        remainingSortedByCurrency.set(inv.currency, [inv]);
       }
     }
 
-    for (const list of sortedByCurrency.values()) {
+    for (const list of remainingSortedByCurrency.values()) {
       list.sort((a, b) => a.amountCents - b.amountCents);
     }
 
@@ -219,46 +273,37 @@ export function reconcile(
       const txCandidates: CandidatePair[] = [];
       let maxCandidateScore = 0;
 
-      // Collect candidate invoices in the restricted amount window:
-      // 1. Exact amount candidates
+      // STAGE 2: Exact amount candidates
       const exactAmountInvoices = remainingByAmount.get(`${tx.currency}:${tx.amountCents}`) || [];
 
-      // 2. Fee tolerance candidates (where inv.amountCents > tx.amountCents)
-      let feeCandidateInvoices: NormalizedInvoice[] = [];
-      if (isFeeToleranceActive) {
-        const sortedCurrencyInvs = sortedByCurrency.get(tx.currency) || [];
-        if (sortedCurrencyInvs.length > 0) {
-          const maxFeeDelta =
-            feeTolerancePercent > 0
-              ? Math.ceil(tx.amountCents / (1 - feeTolerancePercent)) - tx.amountCents
-              : feeToleranceCents;
-          const allowedDelta = Math.max(feeToleranceCents, maxFeeDelta);
-          const maxInvoiceAmount = tx.amountCents + allowedDelta;
+      for (const inv of exactAmountInvoices) {
+        if (matchedInvoiceIds.has(inv.id)) continue;
 
-          feeCandidateInvoices = findInvoicesInAmountRange(
-            sortedCurrencyInvs,
-            tx.amountCents + 1,
-            maxInvoiceAmount
-          );
-        }
-      }
-
-      const candidateInvoices = [...exactAmountInvoices, ...feeCandidateInvoices];
-
-      for (const inv of candidateInvoices) {
         const dayDiffIssue = getDayDifference(tx.bookingDate, inv.issueDate);
         const dayDiffDue = inv.dueDate ? getDayDifference(tx.bookingDate, inv.dueDate) : Infinity;
         const dayDiff = Math.min(dayDiffIssue, dayDiffDue);
 
-        // Date tolerance window: max allowed is dateTolerance + 3
         if (dayDiff > dateTolerance + 3) {
           continue;
         }
 
-        let bestCandidate: CandidatePair | null = null;
+        // Exact Reference fallback
+        if (dayDiff <= dateTolerance && hasExactInvoiceRef(tx, inv)) {
+          const c: CandidatePair = {
+            tx,
+            invoice: inv,
+            confidenceScore: 1.0,
+            level: 'EXACT_REFERENCE',
+            status: 'MATCHED',
+            discrepancies: [],
+          };
+          txCandidates.push(c);
+          if (c.confidenceScore > maxCandidateScore) maxCandidateScore = c.confidenceScore;
+          continue;
+        }
 
         // 2. Exact Metrics (IBAN / Exact Company Name) (0.98)
-        if (tx.amountCents === inv.amountCents && dayDiff <= dateTolerance) {
+        if (dayDiff <= dateTolerance) {
           const ibanMatch =
             tx.counterpartyIban &&
             inv.customerIban &&
@@ -275,7 +320,7 @@ export function reconcile(
               invCompany.includes(txCompany));
 
           if (ibanMatch || companyExactMatch) {
-            bestCandidate = {
+            const c: CandidatePair = {
               tx,
               invoice: inv,
               confidenceScore: 0.98,
@@ -285,75 +330,178 @@ export function reconcile(
                 ? ['Matched via counterparty IBAN and exact amount']
                 : ['Matched via counterparty name and exact amount'],
             };
+            txCandidates.push(c);
+            if (c.confidenceScore > maxCandidateScore) maxCandidateScore = c.confidenceScore;
+            continue;
           }
         }
 
-        // 3. Fuzzy Text Match (Jaro-Winkler) (>= 0.70)
-        if (!bestCandidate && tx.amountCents === inv.amountCents && dayDiff <= dateTolerance + 3) {
-          const { score, reason, hasInvoiceReference } = scoreRemittanceMatch(
-            tx.reference,
-            tx.counterpartyName,
-            inv.invoiceNumber,
-            inv.customerName
+        // 3. STAGE 3A: Fuzzy Text Match (Jaro-Winkler) (>= 0.70)
+        const { score, reason, hasInvoiceReference } = scoreRemittanceMatch(
+          tx.reference,
+          tx.counterpartyName,
+          inv.invoiceNumber,
+          inv.customerName
+        );
+
+        if (score >= 0.70) {
+          const isCompanyOnly = !hasInvoiceReference;
+
+          const ibanMatch = Boolean(
+            tx.counterpartyIban &&
+            inv.customerIban &&
+            tx.counterpartyIban.replace(/\s/g, '').toUpperCase() ===
+              inv.customerIban.replace(/\s/g, '').toUpperCase()
           );
 
-          if (score >= 0.70) {
-            const isCompanyOnly = !hasInvoiceReference;
+          const companySim = computeCompanySimilarity(tx.counterpartyName, inv.customerName);
+          const hasExactInvNum = hasExactInvoiceNumberMatch(tx.reference, inv.invoiceNumber);
 
-            const ibanMatch = Boolean(
-              tx.counterpartyIban &&
-              inv.customerIban &&
-              tx.counterpartyIban.replace(/\s/g, '').toUpperCase() ===
-                inv.customerIban.replace(/\s/g, '').toUpperCase()
+          const isRiskyCounterparty = !hasExactInvNum && companySim < 0.40 && !ibanMatch;
+
+          const status: MatchStatus =
+            !isCompanyOnly && !isRiskyCounterparty && score >= 0.95 ? 'MATCHED' : 'REVIEW_NEEDED';
+          const confidence = isCompanyOnly
+            ? Math.min(0.70, score)
+            : Math.round(score * 100) / 100;
+
+          const discrepancies = [reason || 'High textual similarity on remittance'];
+          if (isCompanyOnly) {
+            discrepancies.push('Missing invoice reference in remittance: matched solely on company name');
+          }
+          if (isRiskyCounterparty) {
+            discrepancies.push(
+              'Risky counterparty mismatch: counterparty similarity < 0.40 and differing IBAN (requires explicit --force)'
             );
+          }
 
-            const companySim = computeCompanySimilarity(tx.counterpartyName, inv.customerName);
-            const hasExactInvNum = hasExactInvoiceNumberMatch(tx.reference, inv.invoiceNumber);
+          const c: CandidatePair = {
+            tx,
+            invoice: inv,
+            confidenceScore: confidence,
+            level: 'FUZZY_REFERENCE',
+            status,
+            discrepancies,
+            requiresForce: isRiskyCounterparty ? true : undefined,
+          };
+          txCandidates.push(c);
+          if (c.confidenceScore > maxCandidateScore) maxCandidateScore = c.confidenceScore;
+        }
+      }
 
-            // Foreign counterparty protection:
-            // If match found only by fuzzy reference (without exact invoice number match),
-            // and counterparty similarity < 0.40, and IBAN does not match:
-            // strictly forbid MATCHED, enforce REVIEW_NEEDED, and require explicit --force
-            const isRiskyCounterparty = !hasExactInvNum && companySim < 0.40 && !ibanMatch;
-
-            const status: MatchStatus =
-              !isCompanyOnly && !isRiskyCounterparty && score >= 0.95 ? 'MATCHED' : 'REVIEW_NEEDED';
-            const confidence = isCompanyOnly
-              ? Math.min(0.70, score)
-              : Math.round(score * 100) / 100;
-
-            const discrepancies = [reason || 'High textual similarity on remittance'];
-            if (isCompanyOnly) {
-              discrepancies.push('Missing invoice reference in remittance: matched solely on company name');
-            }
-            if (isRiskyCounterparty) {
-              discrepancies.push(
-                'Risky counterparty mismatch: counterparty similarity < 0.40 and differing IBAN (requires explicit --force)'
-              );
-            }
-
-            bestCandidate = {
-              tx,
-              invoice: inv,
-              confidenceScore: confidence,
-              level: 'FUZZY_REFERENCE',
-              status,
-              discrepancies,
-              requiresForce: isRiskyCounterparty ? true : undefined,
-            };
+      // STAGE 3B: Fee & Wire Commission Tolerance Match
+      if (isFeeToleranceActive && maxCandidateScore < 0.95) {
+        // Direct reference check first
+        const directCandidates = new Set<NormalizedInvoice>();
+        const keys = extractReferenceKeys(tx);
+        for (const k of keys) {
+          const inv = exactRefIndex.get(k);
+          if (inv && inv !== 'AMBIGUOUS' && !matchedInvoiceIds.has(inv.id) && inv.currency === tx.currency) {
+            directCandidates.add(inv);
           }
         }
 
-        // 4. Fee & Wire Commission Tolerance Match
-        if (!bestCandidate && dayDiff <= dateTolerance + 2) {
-          const amountDiffCents = inv.amountCents - tx.amountCents;
-          if (amountDiffCents > 0) {
-            const minAllowedAmount = Math.floor(inv.amountCents * (1 - feeTolerancePercent));
+        let evaluatedDirect = false;
+        if (directCandidates.size > 0) {
+          for (const inv of directCandidates) {
+            const amountDiffCents = inv.amountCents - tx.amountCents;
+            if (amountDiffCents <= 0) continue;
+
+            const minAllowedAmount = feeTolerancePercent > 0
+              ? Math.floor(inv.amountCents * (1 - feeTolerancePercent))
+              : 0;
             const withinFeeLimit =
               (feeToleranceCents > 0 && amountDiffCents <= feeToleranceCents) ||
               (feeTolerancePercent > 0 && tx.amountCents >= minAllowedAmount);
 
-            if (withinFeeLimit) {
+            if (!withinFeeLimit) continue;
+
+            const dayDiffIssue = getDayDifference(tx.bookingDate, inv.issueDate);
+            const dayDiffDue = inv.dueDate ? getDayDifference(tx.bookingDate, inv.dueDate) : Infinity;
+            const dayDiff = Math.min(dayDiffIssue, dayDiffDue);
+            if (dayDiff > dateTolerance + 2) continue;
+
+            const { score, reason } = scoreRemittanceMatch(
+              tx.reference,
+              tx.counterpartyName,
+              inv.invoiceNumber,
+              inv.customerName
+            );
+
+            if (score >= 0.65) {
+              const ibanMatch = Boolean(
+                tx.counterpartyIban &&
+                inv.customerIban &&
+                tx.counterpartyIban.replace(/\s/g, '').toUpperCase() ===
+                  inv.customerIban.replace(/\s/g, '').toUpperCase()
+              );
+
+              const companySim = computeCompanySimilarity(tx.counterpartyName, inv.customerName);
+              const hasExactInvNum = hasExactInvoiceNumberMatch(tx.reference, inv.invoiceNumber);
+              const isRiskyCounterparty = !hasExactInvNum && companySim < 0.40 && !ibanMatch;
+
+              const feeFormatted = formatCents(amountDiffCents, tx.currency);
+              const discNote = `Amount discrepancy of ${feeFormatted} within fee tolerance (${reason || 'reference matched'})`;
+              const discrepancies = [discNote];
+              if (isRiskyCounterparty) {
+                discrepancies.push(
+                  'Risky counterparty mismatch: counterparty similarity < 0.40 and differing IBAN (requires explicit --force)'
+                );
+              }
+
+              const c: CandidatePair = {
+                tx,
+                invoice: inv,
+                confidenceScore: Math.round(score * 0.9 * 100) / 100,
+                level: 'FEE_TOLERANCE',
+                status: 'REVIEW_NEEDED',
+                feeDeductionCents: amountDiffCents,
+                inferredFeeCents: amountDiffCents,
+                discrepancies,
+                requiresForce: isRiskyCounterparty ? true : undefined,
+              };
+              txCandidates.push(c);
+              if (c.confidenceScore > maxCandidateScore) maxCandidateScore = c.confidenceScore;
+              evaluatedDirect = true;
+            }
+          }
+        }
+
+        if (!evaluatedDirect) {
+          const sortedCurrencyInvs = remainingSortedByCurrency.get(tx.currency) || [];
+          if (sortedCurrencyInvs.length > 0) {
+            const maxFeeDelta =
+              feeTolerancePercent > 0
+                ? Math.ceil(tx.amountCents / (1 - feeTolerancePercent)) - tx.amountCents
+                : feeToleranceCents;
+            const allowedDelta = Math.max(feeToleranceCents, maxFeeDelta);
+            const maxInvoiceAmount = tx.amountCents + allowedDelta;
+
+            const feeCandidateInvoices = findInvoicesInAmountRange(
+              sortedCurrencyInvs,
+              tx.amountCents + 1,
+              maxInvoiceAmount
+            );
+
+            for (const inv of feeCandidateInvoices) {
+              if (matchedInvoiceIds.has(inv.id)) continue;
+
+              const dayDiffIssue = getDayDifference(tx.bookingDate, inv.issueDate);
+              const dayDiffDue = inv.dueDate ? getDayDifference(tx.bookingDate, inv.dueDate) : Infinity;
+              const dayDiff = Math.min(dayDiffIssue, dayDiffDue);
+
+              if (dayDiff > dateTolerance + 2) continue;
+
+              const amountDiffCents = inv.amountCents - tx.amountCents;
+              const minAllowedAmount = feeTolerancePercent > 0
+                ? Math.floor(inv.amountCents * (1 - feeTolerancePercent))
+                : 0;
+              const withinFeeLimit =
+                (feeToleranceCents > 0 && amountDiffCents <= feeToleranceCents) ||
+                (feeTolerancePercent > 0 && tx.amountCents >= minAllowedAmount);
+
+              if (!withinFeeLimit) continue;
+
               const { score, reason } = scoreRemittanceMatch(
                 tx.reference,
                 tx.counterpartyName,
@@ -382,7 +530,7 @@ export function reconcile(
                   );
                 }
 
-                bestCandidate = {
+                const c: CandidatePair = {
                   tx,
                   invoice: inv,
                   confidenceScore: Math.round(score * 0.9 * 100) / 100,
@@ -393,18 +541,10 @@ export function reconcile(
                   discrepancies,
                   requiresForce: isRiskyCounterparty ? true : undefined,
                 };
+                txCandidates.push(c);
+                if (c.confidenceScore > maxCandidateScore) maxCandidateScore = c.confidenceScore;
               }
             }
-          }
-        }
-
-        if (
-          bestCandidate &&
-          (bestCandidate.confidenceScore >= 0.70 || bestCandidate.level === 'FEE_TOLERANCE')
-        ) {
-          txCandidates.push(bestCandidate);
-          if (bestCandidate.confidenceScore > maxCandidateScore) {
-            maxCandidateScore = bestCandidate.confidenceScore;
           }
         }
       }
