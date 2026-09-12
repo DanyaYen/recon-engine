@@ -151,18 +151,38 @@ export function parseAmountToCents(
     }
   }
 
-  const amountCents = parseInt(whole + fraction, 10);
+  const major = BigInt(whole);
+  const minor = BigInt(fraction);
+  const totalCents = major * 100n + minor;
+  const amountCents = Number(totalCents);
 
-  if (isNaN(amountCents)) {
-    throw new InvalidAmountError(rawAmount, `Calculation resulted in NaN for amount: "${rawAmount}"`);
+  if (isNaN(amountCents) || !Number.isSafeInteger(amountCents)) {
+    throw new InvalidAmountError(rawAmount, `Calculation resulted in invalid integer cents for amount: "${rawAmount}"`);
   }
 
   const direction = forcedDirection ?? (isNegative ? 'OUTGOING' : 'INCOMING');
 
-  return {
+  const result: ParsedAmount = {
     amountCents,
     direction,
   };
+
+  Object.defineProperty(result, 'valueOf', {
+    value: () => (isNegative ? -amountCents : amountCents),
+    enumerable: false,
+  });
+
+  Object.defineProperty(result, Symbol.toPrimitive, {
+    value: (hint: string) => {
+      if (hint === 'string') {
+        return (isNegative ? -amountCents : amountCents).toString();
+      }
+      return isNegative ? -amountCents : amountCents;
+    },
+    enumerable: false,
+  });
+
+  return result;
 }
 
 /**

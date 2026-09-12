@@ -7,12 +7,17 @@ import { cleanCompanyName, extractInvoiceCandidates, normalizeRemittance } from 
 describe('Money utilities', () => {
   it('parses US formatted decimal amounts to integer cents', () => {
     expect(parseAmountToCents('1,250.50')).toEqual({ amountCents: 125050, direction: 'INCOMING' });
+    expect(parseAmountToCents('1250.50')).toEqual({ amountCents: 125050, direction: 'INCOMING' });
+    expect(parseAmountToCents('1250.45')).toEqual({ amountCents: 125045, direction: 'INCOMING' });
+    expect(parseAmountToCents('-45.10')).toEqual({ amountCents: 4510, direction: 'OUTGOING' });
     expect(parseAmountToCents('-45.20')).toEqual({ amountCents: 4520, direction: 'OUTGOING' });
     expect(parseAmountToCents('(100.00)')).toEqual({ amountCents: 10000, direction: 'OUTGOING' });
   });
 
   it('parses European comma decimal amounts to integer cents', () => {
     expect(parseAmountToCents('1.250,50')).toEqual({ amountCents: 125050, direction: 'INCOMING' });
+    expect(parseAmountToCents('1.250,50 EUR')).toEqual({ amountCents: 125050, direction: 'INCOMING' });
+    expect(parseAmountToCents('1250,50')).toEqual({ amountCents: 125050, direction: 'INCOMING' });
     expect(parseAmountToCents('-3.450,00')).toEqual({ amountCents: 345000, direction: 'OUTGOING' });
     expect(parseAmountToCents('99,99')).toEqual({ amountCents: 9999, direction: 'INCOMING' });
   });
@@ -37,6 +42,40 @@ describe('Money utilities', () => {
     expect(parseAmountToCents('0.999')).toEqual({ amountCents: 100, direction: 'INCOMING' });
     expect(parseAmountToCents('-1.005')).toEqual({ amountCents: 101, direction: 'OUTGOING' });
     expect(parseAmountToCents('$ 1,234.567')).toEqual({ amountCents: 123457, direction: 'INCOMING' });
+  });
+
+  it('prevents floating-point precision loss and parses edge cases to integer cents', () => {
+    // Edge cases specified in requirements
+    // "0.07" -> 7
+    const c1 = parseAmountToCents('0.07');
+    expect(c1).toEqual({ amountCents: 7, direction: 'INCOMING' });
+    expect(c1.amountCents).toBe(7);
+    expect(Number(c1)).toBe(7);
+
+    // "1250.45" -> 125045
+    const c2 = parseAmountToCents('1250.45');
+    expect(c2).toEqual({ amountCents: 125045, direction: 'INCOMING' });
+    expect(c2.amountCents).toBe(125045);
+    expect(Number(c2)).toBe(125045);
+
+    // "1.250,50" -> 125050
+    const c3 = parseAmountToCents('1.250,50');
+    expect(c3).toEqual({ amountCents: 125050, direction: 'INCOMING' });
+    expect(c3.amountCents).toBe(125050);
+    expect(Number(c3)).toBe(125050);
+
+    // "-45.10" -> -4510
+    const c4 = parseAmountToCents('-45.10');
+    expect(c4).toEqual({ amountCents: 4510, direction: 'OUTGOING' });
+    expect(c4.amountCents).toBe(4510);
+    expect(c4.direction).toBe('OUTGOING');
+    expect(Number(c4)).toBe(-4510);
+
+    // European formatting ("1.250,50 EUR", "1250,50") and US/UK formatting ("1,250.50", "1250.50")
+    expect(parseAmountToCents('1.250,50 EUR').amountCents).toBe(125050);
+    expect(parseAmountToCents('1250,50').amountCents).toBe(125050);
+    expect(parseAmountToCents('1,250.50').amountCents).toBe(125050);
+    expect(parseAmountToCents('1250.50').amountCents).toBe(125050);
   });
 
   it('throws InvalidAmountError on invalid amounts instead of returning 0', () => {
