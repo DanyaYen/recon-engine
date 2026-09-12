@@ -590,6 +590,45 @@ describe('Matching Engine (Deterministic & Fuzzy)', () => {
     expect(usdTotals.feeCents).toBe(290);
   });
 
+  it('yields PARTIAL_MATCH with 400 EUR remaining for a 600 EUR payment against a 1,000 EUR invoice', () => {
+    const invs: NormalizedInvoice[] = [
+      {
+        id: 'inv_partial_1',
+        invoiceNumber: 'INV-2024-PARTIAL-1',
+        amountCents: 100000, // €1,000.00
+        currency: 'EUR',
+        issueDate: '2024-09-01',
+        status: 'OPEN',
+        customerName: 'Acme Corp GmbH',
+      },
+    ];
+
+    const txs: NormalizedTransaction[] = [
+      {
+        id: 'tx_partial_1',
+        bookingDate: '2024-09-02',
+        amountCents: 60000, // €600.00 partial payment
+        currency: 'EUR',
+        direction: 'INCOMING',
+        counterpartyName: 'Acme Corp GmbH',
+        reference: 'Partial payment for INV-2024-PARTIAL-1',
+        sourceFormat: 'test',
+      },
+    ];
+
+    const report = reconcile(txs, invs);
+    expect(report.matches.length).toBe(1);
+    const m = report.matches[0];
+    expect(m.status).toBe('PARTIAL_MATCH');
+    expect(m.level).toBe('PARTIAL_MATCH');
+    expect(m.matchedCents).toBe(60000);
+    expect(m.remainingCents).toBe(40000); // 1,000 EUR - 600 EUR = 400 EUR
+    expect(m.invoice?.invoiceNumber).toBe('INV-2024-PARTIAL-1');
+    expect(m.invoice?.remainingCents).toBe(40000);
+    expect(invs[0].remainingCents).toBe(40000);
+    expect(m.discrepancies[0]).toContain('Partial payment');
+  });
+
   it('benchmark: matches 2,000 transactions against 2,000 invoices in < 250ms', () => {
     const invoices: NormalizedInvoice[] = [];
     const transactions: NormalizedTransaction[] = [];

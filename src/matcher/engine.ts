@@ -217,6 +217,8 @@ interface CandidatePair {
   discrepancies: string[];
   feeDeductionCents?: number;
   inferredFeeCents?: number;
+  matchedCents?: number;
+  remainingCents?: number;
   requiresForce?: boolean;
 }
 
@@ -323,13 +325,91 @@ export function reconcile(
       if (dayDiff <= dateTolerance) {
         matchedTxIds.add(tx.id);
         matchedInvoiceIds.add(inv.id);
+        inv.remainingCents = 0;
         matches.push({
           status: 'MATCHED',
           level: 'EXACT_REFERENCE',
           confidenceScore: 1.0,
+          matchedCents: tx.amountCents,
+          remainingCents: 0,
           transaction: tx,
           invoice: inv,
           discrepancies: [],
+          applied: false,
+        });
+        break;
+      }
+    }
+  }
+
+  // =========================================================================
+  // STAGE 1.5: PARTIAL PAYMENT RESIDUAL TRACKING
+  // If reference matches an invoice exactly, but tx.amountCents < invoice.amountCents
+  // (and difference > feeTolerance), mark as PARTIAL_MATCH and track remainingCents.
+  // =========================================================================
+  for (const tx of incomingTxs) {
+    if (matchedTxIds.has(tx.id)) continue;
+
+    const keys = extractReferenceKeys(tx);
+    for (const key of keys) {
+      const inv = exactRefIndex.get(key);
+      if (!inv || inv === 'AMBIGUOUS' || matchedInvoiceIds.has(inv.id)) {
+        continue;
+      }
+
+      if (tx.currency !== inv.currency) {
+        continue;
+      }
+
+      const currentRemaining =
+        inv.remainingCents !== undefined ? inv.remainingCents : inv.amountCents;
+
+      // Only consider if transaction amount is less than remaining invoice amount
+      if (tx.amountCents >= currentRemaining) {
+        continue;
+      }
+
+      const diffCents = currentRemaining - tx.amountCents;
+      const minAllowedFeeAmount =
+        feeTolerancePercent > 0
+          ? Math.floor(currentRemaining * (1 - feeTolerancePercent))
+          : 0;
+      const withinFeeLimit =
+        (feeToleranceCents > 0 && diffCents <= feeToleranceCents) ||
+        (feeTolerancePercent > 0 && tx.amountCents >= minAllowedFeeAmount);
+
+      // If difference <= feeTolerance, leave for fee tolerance evaluation in Stage 3B
+      if (withinFeeLimit) {
+        continue;
+      }
+
+      // Gateway/Stripe payouts with fee discrepancy exceeding tolerance are rejected, not treated as partial payments
+      if (tx.sourceFormat === 'stripe' && !/partial/i.test(tx.reference || '')) {
+        continue;
+      }
+
+      const dayDiffIssue = getDayDifference(tx.bookingDate, inv.issueDate);
+      const dayDiffDue = inv.dueDate ? getDayDifference(tx.bookingDate, inv.dueDate) : Infinity;
+      const dayDiff = Math.min(dayDiffIssue, dayDiffDue);
+
+      if (dayDiff <= dateTolerance + 3) {
+        const remainingCents = currentRemaining - tx.amountCents;
+        inv.remainingCents = remainingCents;
+
+        matchedTxIds.add(tx.id);
+        matchedInvoiceIds.add(inv.id);
+
+        matches.push({
+          status: 'PARTIAL_MATCH',
+          level: 'PARTIAL_MATCH',
+          confidenceScore: 0.95,
+          matchedCents: tx.amountCents,
+          remainingCents,
+          transaction: tx,
+          invoice: inv,
+          discrepancies: [
+            `Partial payment: ${formatCents(tx.amountCents, tx.currency)} paid towards invoice ${inv.invoiceNumber} (${formatCents(inv.amountCents, inv.currency)} total, ${formatCents(remainingCents, inv.currency)} remaining)`,
+          ],
           applied: false,
         });
         break;
@@ -701,9 +781,10 @@ export function reconcile(
         return b.confidenceScore - a.confidenceScore;
       }
       const levelPriority: Record<MatchLevel, number> = {
-        EXACT_REFERENCE: 4,
-        EXACT_METRICS: 3,
-        FUZZY_REFERENCE: 2,
+        EXACT_REFERENCE: 5,
+        EXACT_METRICS: 4,
+        FUZZY_REFERENCE: 3,
+        PARTIAL_MATCH: 2,
         FEE_TOLERANCE: 1,
         NONE: 0,
       };
@@ -753,6 +834,8 @@ export function reconcile(
           confidenceScore: cand.confidenceScore,
           feeDeductionCents: cand.feeDeductionCents,
           inferredFeeCents: cand.inferredFeeCents,
+          matchedCents: cand.matchedCents ?? cand.tx.amountCents,
+          remainingCents: cand.remainingCents ?? 0,
           transaction: cand.tx,
           invoice: cand.invoice,
           discrepancies: [
@@ -771,6 +854,8 @@ export function reconcile(
             confidenceScore: comp.confidenceScore,
             feeDeductionCents: comp.feeDeductionCents,
             inferredFeeCents: comp.inferredFeeCents,
+            matchedCents: comp.matchedCents ?? comp.tx.amountCents,
+            remainingCents: comp.remainingCents ?? 0,
             transaction: comp.tx,
             invoice: comp.invoice,
             discrepancies: [
@@ -821,6 +906,8 @@ export function reconcile(
           confidenceScore: isFeeTolerance ? 0.65 : cand.confidenceScore,
           feeDeductionCents: cand.feeDeductionCents,
           inferredFeeCents: cand.inferredFeeCents,
+          matchedCents: cand.matchedCents ?? cand.tx.amountCents,
+          remainingCents: cand.remainingCents ?? 0,
           transaction: cand.tx,
           invoice: cand.invoice,
           discrepancies,
@@ -839,6 +926,8 @@ export function reconcile(
         confidenceScore: cand.confidenceScore,
         feeDeductionCents: cand.feeDeductionCents,
         inferredFeeCents: cand.inferredFeeCents,
+        matchedCents: cand.matchedCents ?? cand.tx.amountCents,
+        remainingCents: cand.remainingCents ?? 0,
         transaction: cand.tx,
         invoice: cand.invoice,
         discrepancies: cand.discrepancies,
@@ -857,6 +946,8 @@ export function reconcile(
         status: 'UNMATCHED',
         level: 'NONE',
         confidenceScore: 0.0,
+        matchedCents: 0,
+        remainingCents: 0,
         transaction: tx,
         discrepancies: ['No matching invoice found for incoming transfer'],
         applied: false,
@@ -869,6 +960,8 @@ export function reconcile(
       status: 'UNMATCHED',
       level: 'NONE',
       confidenceScore: 0.0,
+      matchedCents: 0,
+      remainingCents: 0,
       transaction: tx,
       discrepancies: ['Outgoing bank debit / payout'],
       applied: false,
@@ -881,7 +974,9 @@ export function reconcile(
   );
 
   // Compute summary metrics
-  const matchedCount = matches.filter((m) => m.status === 'MATCHED').length;
+  const matchedCount = matches.filter(
+    (m) => m.status === 'MATCHED' || m.status === 'EXACT_MATCH' || m.status === 'PARTIAL_MATCH'
+  ).length;
   const reviewNeededCount = matches.filter((m) => m.status === 'REVIEW_NEEDED').length;
   const unmatchedCount = matches.filter((m) => m.status === 'UNMATCHED').length;
 
@@ -916,13 +1011,15 @@ export function reconcile(
       totalsByCurrency[curr] = { matchedCents: 0, unmatchedCents: 0, feeCents: 0 };
     }
 
-    if (m.status === 'MATCHED') {
+    if (m.status === 'MATCHED' || m.status === 'EXACT_MATCH' || m.status === 'FUZZY_MATCH') {
       totalsByCurrency[curr].matchedCents += m.invoice
         ? m.invoice.amountCents
         : m.transaction.amountCents;
       if (m.inferredFeeCents || m.feeDeductionCents) {
         totalsByCurrency[curr].feeCents += m.inferredFeeCents || m.feeDeductionCents || 0;
       }
+    } else if (m.status === 'PARTIAL_MATCH') {
+      totalsByCurrency[curr].matchedCents += m.matchedCents ?? m.transaction.amountCents;
     } else if (m.status === 'UNMATCHED') {
       totalsByCurrency[curr].unmatchedCents += m.transaction.amountCents;
     } else if (m.status === 'REVIEW_NEEDED') {

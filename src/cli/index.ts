@@ -214,7 +214,9 @@ program
       const reviewMatches = report.matches.filter((m) => m.status === 'REVIEW_NEEDED');
 
       const updateSummaryMetrics = () => {
-        report.summary.matchedCount = report.matches.filter((m) => m.status === 'MATCHED').length;
+        report.summary.matchedCount = report.matches.filter(
+          (m) => m.status === 'MATCHED' || m.status === 'EXACT_MATCH' || m.status === 'PARTIAL_MATCH'
+        ).length;
         report.summary.reviewNeededCount = report.matches.filter(
           (m) => m.status === 'REVIEW_NEEDED'
         ).length;
@@ -234,13 +236,15 @@ program
           if (!totals[curr]) {
             totals[curr] = { matchedCents: 0, unmatchedCents: 0, feeCents: 0 };
           }
-          if (m.status === 'MATCHED') {
+          if (m.status === 'MATCHED' || m.status === 'EXACT_MATCH' || m.status === 'FUZZY_MATCH') {
             totals[curr].matchedCents += m.invoice
               ? m.invoice.amountCents
               : m.transaction.amountCents;
             if (m.inferredFeeCents || m.feeDeductionCents) {
               totals[curr].feeCents += m.inferredFeeCents || m.feeDeductionCents || 0;
             }
+          } else if (m.status === 'PARTIAL_MATCH') {
+            totals[curr].matchedCents += m.matchedCents ?? m.transaction.amountCents;
           } else if (m.status === 'UNMATCHED') {
             totals[curr].unmatchedCents += m.transaction.amountCents;
           } else if (m.status === 'REVIEW_NEEDED') {
@@ -394,7 +398,8 @@ program
         const inv = m.invoice;
 
         let statusBadge = pc.red('UNMATCHED');
-        if (m.status === 'MATCHED') statusBadge = pc.green('✓ MATCHED');
+        if (m.status === 'MATCHED' || m.status === 'EXACT_MATCH') statusBadge = pc.green('✓ MATCHED');
+        else if (m.status === 'PARTIAL_MATCH') statusBadge = pc.cyan('◒ PARTIAL');
         else if (m.status === 'REVIEW_NEEDED') statusBadge = pc.yellow('⚠️ REVIEW');
 
         const txAmtFormatted =

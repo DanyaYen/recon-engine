@@ -15,6 +15,7 @@ export const NormalizedInvoiceSchema = z.object({
   customerEmail: z.string().email().optional().describe('Customer contact email address'),
   customerIban: z.string().optional().describe('Saved customer bank account IBAN, if available'),
   metadata: z.record(z.string()).optional().describe('Arbitrary metadata (e.g. Stripe customer_id, subscription_id)'),
+  remainingCents: z.number().int().nonnegative().optional().describe('Remaining unpaid invoice amount in integer minor units (cents)'),
 });
 
 export type NormalizedInvoice = z.infer<typeof NormalizedInvoiceSchema>;

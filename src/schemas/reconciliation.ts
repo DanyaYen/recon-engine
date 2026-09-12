@@ -2,7 +2,14 @@ import { z } from 'zod';
 import { NormalizedTransactionSchema } from './transaction.js';
 import { NormalizedInvoiceSchema } from './invoice.js';
 
-export const MatchStatusSchema = z.enum(['MATCHED', 'REVIEW_NEEDED', 'UNMATCHED']);
+export const MatchStatusSchema = z.enum([
+  'EXACT_MATCH',
+  'FUZZY_MATCH',
+  'PARTIAL_MATCH',
+  'UNMATCHED',
+  'MATCHED',
+  'REVIEW_NEEDED',
+]);
 export type MatchStatus = z.infer<typeof MatchStatusSchema>;
 
 export const MatchLevelSchema = z.enum([
@@ -10,6 +17,7 @@ export const MatchLevelSchema = z.enum([
   'EXACT_METRICS',
   'FUZZY_REFERENCE',
   'FEE_TOLERANCE',
+  'PARTIAL_MATCH',
   'NONE',
 ]);
 export type MatchLevel = z.infer<typeof MatchLevelSchema>;
@@ -20,6 +28,8 @@ export const MatchResultSchema = z.object({
   confidenceScore: z.number().min(0).max(1),
   feeDeductionCents: z.number().int().nonnegative().optional().describe('Deducted bank wire fee in minor units'),
   inferredFeeCents: z.number().int().nonnegative().optional().describe('Inferred processing/gateway fee in minor units (invoice - tx)'),
+  matchedCents: z.number().int().nonnegative().optional().describe('Matched transaction/invoice amount in minor units'),
+  remainingCents: z.number().int().nonnegative().optional().describe('Remaining unpaid invoice amount in minor units (invoice.amountCents - transaction.amountCents)'),
   transaction: NormalizedTransactionSchema,
   invoice: NormalizedInvoiceSchema.optional(),
   discrepancies: z.array(z.string()).default([]),
