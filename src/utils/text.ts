@@ -59,17 +59,20 @@ const STOP_WORDS = [
   'für',
 ];
 
+const LEGAL_SUFFIXES_REGEX = new RegExp(
+  `\\b(?:${LEGAL_SUFFIXES.map((s) => s.replace(/ /g, '\\s+')).join('|')})\\b`,
+  'gi'
+);
+
 /**
  * Normalizes a company or counterparty name by lowercasing,
  * removing punctuation, and stripping common legal corporate forms.
  */
 export function cleanCompanyName(name: string): string {
-  let cleaned = name.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, ' ');
-
-  for (const suffix of LEGAL_SUFFIXES) {
-    const regex = new RegExp(`\\b${suffix}\\b`, 'gi');
-    cleaned = cleaned.replace(regex, ' ');
-  }
+  const cleaned = name
+    .toLowerCase()
+    .replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, ' ')
+    .replace(LEGAL_SUFFIXES_REGEX, ' ');
 
   return cleaned.replace(/\s+/g, ' ').trim();
 }
@@ -139,6 +142,11 @@ export function extractInvoiceCandidates(text: string): string[] {
   return Array.from(candidates);
 }
 
+const STOP_WORDS_REGEX = new RegExp(
+  `\\b(?:${STOP_WORDS.map((w) => w.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')).join('|')})\\b`,
+  'gi'
+);
+
 /**
  * Cleans remittance text for fuzzy similarity comparison.
  * Strips ISO/SWIFT tags (EREF+, SVWZ+, /EREF/, etc.), banking stop-words, and legal entity forms.
@@ -146,25 +154,14 @@ export function extractInvoiceCandidates(text: string): string[] {
 export function normalizeRemittance(text: string): string {
   if (!text) return '';
 
-  let cleaned = text;
-
-  // Strip banking field tags like EREF+..., SVWZ+..., /EREF/..., etc.
-  cleaned = cleaned.replace(/\b(eref|svwz|kref|mref|pref|cred|debt)\+/gi, ' ');
-  cleaned = cleaned.replace(/\/(eref|svwz|kref|mref|benm|iban|bic)\//gi, ' ');
-  cleaned = cleaned.replace(/\?[0-9]{2}/g, ' '); // SWIFT subfield markers like ?20, ?32
-
-  // Remove punctuation
-  cleaned = cleaned.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()\\+?<>]/g, ' ');
-
-  for (const word of STOP_WORDS) {
-    const regex = new RegExp(`\\b${word}\\b`, 'gi');
-    cleaned = cleaned.replace(regex, ' ');
-  }
-
-  for (const suffix of LEGAL_SUFFIXES) {
-    const regex = new RegExp(`\\b${suffix}\\b`, 'gi');
-    cleaned = cleaned.replace(regex, ' ');
-  }
-
-  return cleaned.replace(/\s+/g, ' ').trim();
+  return text
+    .replace(/\b(eref|svwz|kref|mref|pref|cred|debt)\+/gi, ' ')
+    .replace(/\/(eref|svwz|kref|mref|benm|iban|bic)\//gi, ' ')
+    .replace(/\?[0-9]{2}/g, ' ')
+    .toLowerCase()
+    .replace(/[.,/#!$%^&*;:{}=\-_`~()\\+?<>]/g, ' ')
+    .replace(STOP_WORDS_REGEX, ' ')
+    .replace(LEGAL_SUFFIXES_REGEX, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
