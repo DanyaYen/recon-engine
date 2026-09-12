@@ -40,6 +40,13 @@ export const MatcherOptionsSchema = z.object({
 
 export type MatcherOptions = z.infer<typeof MatcherOptionsSchema>;
 
+export const CurrencyTotalSchema = z.object({
+  matchedCents: z.number(),
+  unmatchedCents: z.number(),
+  feeCents: z.number(),
+});
+export type CurrencyTotal = z.infer<typeof CurrencyTotalSchema>;
+
 export const ReconciliationReportSchema = z.object({
   id: z.string().uuid(),
   createdAt: z.string().datetime(),
@@ -51,8 +58,18 @@ export const ReconciliationReportSchema = z.object({
     matchedCount: z.number().int().nonnegative(),
     reviewNeededCount: z.number().int().nonnegative(),
     unmatchedCount: z.number().int().nonnegative(),
-    totalMatchedCents: z.number().int().nonnegative(),
-    currency: z.string(),
+    /** @deprecated Use totalsByCurrency instead */
+    totalMatchedCents: z.number().optional(),
+    /** @deprecated Use totalsByCurrency instead */
+    currency: z.string().optional(),
+    totalsByCurrency: z.record(
+      z.string(),
+      z.object({
+        matchedCents: z.number(),
+        unmatchedCents: z.number(),
+        feeCents: z.number(),
+      })
+    ),
   }),
   matches: z.array(MatchResultSchema),
   unmatchedInvoices: z.array(NormalizedInvoiceSchema),

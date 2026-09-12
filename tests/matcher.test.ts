@@ -503,6 +503,93 @@ describe('Matching Engine (Deterministic & Fuzzy)', () => {
     expect(report.summary.matchedCount).toBe(0);
   });
 
+  it('computes multi-currency totalsByCurrency accurately for mixed statements', () => {
+    const txs: NormalizedTransaction[] = [
+      {
+        id: 'tx_eur_1',
+        bookingDate: '2024-09-01',
+        amountCents: 100000,
+        currency: 'EUR',
+        direction: 'INCOMING',
+        reference: 'INV-2024-EUR-1',
+        sourceFormat: 'test',
+      },
+      {
+        id: 'tx_eur_2',
+        bookingDate: '2024-09-02',
+        amountCents: 50000,
+        currency: 'EUR',
+        direction: 'INCOMING',
+        reference: 'Unmatched EUR',
+        sourceFormat: 'test',
+      },
+      {
+        id: 'tx_usd_1',
+        bookingDate: '2024-09-01',
+        amountCents: 200000,
+        currency: 'USD',
+        direction: 'INCOMING',
+        reference: 'INV-2024-USD-1',
+        sourceFormat: 'test',
+      },
+      {
+        id: 'tx_usd_fee',
+        bookingDate: '2024-09-02',
+        amountCents: 9710,
+        currency: 'USD',
+        direction: 'INCOMING',
+        counterpartyName: 'Stripe Gateway',
+        reference: 'INV-2024-USD-2 fee payout',
+        sourceFormat: 'test',
+      },
+    ];
+
+    const invs: NormalizedInvoice[] = [
+      {
+        id: 'inv_eur_1',
+        invoiceNumber: 'INV-2024-EUR-1',
+        amountCents: 100000,
+        currency: 'EUR',
+        issueDate: '2024-09-01',
+        status: 'OPEN',
+        customerName: 'Customer EUR GmbH',
+      },
+      {
+        id: 'inv_usd_1',
+        invoiceNumber: 'INV-2024-USD-1',
+        amountCents: 200000,
+        currency: 'USD',
+        issueDate: '2024-09-01',
+        status: 'OPEN',
+        customerName: 'Customer USD Corp',
+      },
+      {
+        id: 'inv_usd_2',
+        invoiceNumber: 'INV-2024-USD-2',
+        amountCents: 10000,
+        currency: 'USD',
+        issueDate: '2024-09-01',
+        status: 'OPEN',
+        customerName: 'Stripe Gateway',
+      },
+    ];
+
+    const report = reconcile(txs, invs, { feeTolerancePercentage: 0.03 });
+    expect(report.summary.totalsByCurrency).toBeDefined();
+
+    const eurTotals = report.summary.totalsByCurrency['EUR'];
+    expect(eurTotals).toBeDefined();
+    expect(eurTotals.matchedCents).toBe(100000);
+    expect(eurTotals.unmatchedCents).toBe(50000);
+    expect(eurTotals.feeCents).toBe(0);
+
+    const usdTotals = report.summary.totalsByCurrency['USD'];
+    expect(usdTotals).toBeDefined();
+    expect(usdTotals.matchedCents).toBe(200000);
+    expect(usdTotals.unmatchedCents).toBe(0);
+    expect(usdTotals.feeCents).toBe(290);
+  });
+
   it('benchmark: matches 2,000 transactions against 2,000 invoices in < 250ms', () => {
     const invoices: NormalizedInvoice[] = [];
     const transactions: NormalizedTransaction[] = [];

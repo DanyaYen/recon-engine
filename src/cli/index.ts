@@ -218,9 +218,40 @@ program
         report.summary.reviewNeededCount = report.matches.filter(
           (m) => m.status === 'REVIEW_NEEDED'
         ).length;
-        report.summary.totalMatchedCents = report.matches
-          .filter((m) => m.status === 'MATCHED' && m.invoice)
-          .reduce((sum, m) => sum + m.invoice!.amountCents, 0);
+        report.summary.unmatchedCount = report.matches.filter(
+          (m) => m.status === 'UNMATCHED'
+        ).length;
+
+        const totals: Record<
+          string,
+          { matchedCents: number; unmatchedCents: number; feeCents: number }
+        > = {};
+        for (const curr of Object.keys(report.summary.totalsByCurrency || {})) {
+          totals[curr] = { matchedCents: 0, unmatchedCents: 0, feeCents: 0 };
+        }
+        for (const m of report.matches) {
+          const curr = m.transaction.currency || m.invoice?.currency || 'EUR';
+          if (!totals[curr]) {
+            totals[curr] = { matchedCents: 0, unmatchedCents: 0, feeCents: 0 };
+          }
+          if (m.status === 'MATCHED') {
+            totals[curr].matchedCents += m.invoice
+              ? m.invoice.amountCents
+              : m.transaction.amountCents;
+            if (m.inferredFeeCents || m.feeDeductionCents) {
+              totals[curr].feeCents += m.inferredFeeCents || m.feeDeductionCents || 0;
+            }
+          } else if (m.status === 'UNMATCHED') {
+            totals[curr].unmatchedCents += m.transaction.amountCents;
+          } else if (m.status === 'REVIEW_NEEDED') {
+            if (m.inferredFeeCents || m.feeDeductionCents) {
+              totals[curr].feeCents += m.inferredFeeCents || m.feeDeductionCents || 0;
+            }
+          }
+        }
+        report.summary.totalsByCurrency = totals;
+        const defaultCurr = report.summary.currency || Object.keys(totals)[0] || 'EUR';
+        report.summary.totalMatchedCents = totals[defaultCurr]?.matchedCents || 0;
       };
 
       if (options.yes) {
@@ -402,11 +433,43 @@ program
       console.log(table.toString());
       console.log();
 
+      // Totals by Currency Table
+      const currencyEntries = Object.entries(report.summary.totalsByCurrency || {});
+      if (currencyEntries.length > 0) {
+        const currencyTable = new Table({
+          head: [
+            pc.bold('Currency'),
+            pc.bold('Reconciled'),
+            pc.bold('Unmatched'),
+            pc.bold('Fees Deducted'),
+          ],
+          style: { head: [], border: [] },
+        });
+
+        for (const [currency, totals] of currencyEntries) {
+          currencyTable.push([
+            pc.bold(currency),
+            pc.green(formatCents(totals.matchedCents, currency)),
+            pc.red(formatCents(totals.unmatchedCents, currency)),
+            totals.feeCents > 0
+              ? pc.yellow(formatCents(totals.feeCents, currency))
+              : pc.dim('—'),
+          ]);
+        }
+
+        console.log(pc.bold('  Totals by Currency:'));
+        console.log(currencyTable.toString());
+        console.log();
+      }
+
       // Summary Card
       console.log(pc.bold('  Summary:'));
+      const currencySummaries = currencyEntries
+        .map(([curr, t]) => formatCents(t.matchedCents, curr))
+        .join(', ');
       console.log(
         pc.green(`  • Reconciled (MATCHED):   ${report.summary.matchedCount}`) +
-          pc.dim(` (${formatCents(report.summary.totalMatchedCents, report.summary.currency)})`)
+          (currencySummaries ? pc.dim(` (${currencySummaries})`) : '')
       );
       if (report.summary.reviewNeededCount > 0) {
         console.log(

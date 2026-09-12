@@ -58,4 +58,35 @@ describe('CLI Commands', () => {
     expect(res.stdout).toContain('--statement <file>');
     expect(res.stdout).toContain('--invoices <file>');
   });
+
+  it('outputs Totals by Currency table in recon match', () => {
+    const statement = join(FIXTURES_DIR, 'revolut/revolut-multi-currency.csv');
+    const invoices = join(FIXTURES_DIR, 'invoices/invoices.json');
+    const res = spawnSync(
+      'bun',
+      [CLI_PATH, 'match', '--statement', statement, '--invoices', invoices, '--non-interactive'],
+      { encoding: 'utf-8' }
+    );
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain('Totals by Currency:');
+    expect(res.stdout).toContain('USD');
+    expect(res.stdout).toContain('GBP');
+    expect(res.stdout).toContain('EUR');
+  });
+
+  it('outputs totalsByCurrency in recon match --json', () => {
+    const statement = join(FIXTURES_DIR, 'revolut/revolut-multi-currency.csv');
+    const invoices = join(FIXTURES_DIR, 'invoices/invoices.json');
+    const res = spawnSync(
+      'bun',
+      [CLI_PATH, 'match', '--statement', statement, '--invoices', invoices, '--json'],
+      { encoding: 'utf-8' }
+    );
+    expect(res.status).toBe(0);
+    const report = JSON.parse(res.stdout);
+    expect(report.summary.totalsByCurrency).toBeDefined();
+    expect(report.summary.totalsByCurrency.USD).toBeDefined();
+    expect(report.summary.totalsByCurrency.GBP).toBeDefined();
+    expect(report.summary.totalsByCurrency.EUR).toBeDefined();
+  });
 });

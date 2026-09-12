@@ -746,15 +746,56 @@ export function reconcile(
   const reviewNeededCount = matches.filter((m) => m.status === 'REVIEW_NEEDED').length;
   const unmatchedCount = matches.filter((m) => m.status === 'UNMATCHED').length;
 
-  let totalMatchedCents = 0;
+  // Collect all currencies encountered
+  const currencies = new Set<string>();
+  for (const tx of transactions) {
+    if (tx.currency) currencies.add(tx.currency);
+  }
+  for (const inv of invoices) {
+    if (inv.currency) currencies.add(inv.currency);
+  }
+  if (currencies.size === 0) {
+    currencies.add('EUR');
+  }
+
+  const totalsByCurrency: Record<
+    string,
+    { matchedCents: number; unmatchedCents: number; feeCents: number }
+  > = {};
+
+  for (const curr of currencies) {
+    totalsByCurrency[curr] = {
+      matchedCents: 0,
+      unmatchedCents: 0,
+      feeCents: 0,
+    };
+  }
+
   for (const m of matches) {
-    if (m.status === 'MATCHED' && m.invoice) {
-      totalMatchedCents += m.invoice.amountCents;
+    const curr = m.transaction.currency || m.invoice?.currency || 'EUR';
+    if (!totalsByCurrency[curr]) {
+      totalsByCurrency[curr] = { matchedCents: 0, unmatchedCents: 0, feeCents: 0 };
+    }
+
+    if (m.status === 'MATCHED') {
+      totalsByCurrency[curr].matchedCents += m.invoice
+        ? m.invoice.amountCents
+        : m.transaction.amountCents;
+      if (m.inferredFeeCents || m.feeDeductionCents) {
+        totalsByCurrency[curr].feeCents += m.inferredFeeCents || m.feeDeductionCents || 0;
+      }
+    } else if (m.status === 'UNMATCHED') {
+      totalsByCurrency[curr].unmatchedCents += m.transaction.amountCents;
+    } else if (m.status === 'REVIEW_NEEDED') {
+      if (m.inferredFeeCents || m.feeDeductionCents) {
+        totalsByCurrency[curr].feeCents += m.inferredFeeCents || m.feeDeductionCents || 0;
+      }
     }
   }
 
   const defaultCurrency =
     transactions[0]?.currency || invoices[0]?.currency || 'EUR';
+  const totalMatchedCents = totalsByCurrency[defaultCurrency]?.matchedCents || 0;
 
   return {
     id: randomUUID(),
@@ -769,6 +810,7 @@ export function reconcile(
       unmatchedCount,
       totalMatchedCents,
       currency: defaultCurrency,
+      totalsByCurrency,
     },
     matches,
     unmatchedInvoices,
