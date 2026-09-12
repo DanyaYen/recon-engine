@@ -375,6 +375,101 @@ describe('Matching Engine (Deterministic & Fuzzy)', () => {
     const m = report.matches[0];
     expect(m.status).toBe('REVIEW_NEEDED');
     expect(m.feeDeductionCents).toBe(1500); // 100000 - 98500 = 1500 cents
+    expect(m.inferredFeeCents).toBe(1500);
+  });
+
+  it('matches payment gateway transfer with fee deduction within feeTolerancePercentage and records inferredFeeCents', () => {
+    // Stripe entry of $97.10 (9,710 cents) corresponding to invoice of $100.00 (10,000 cents)
+    const invs: NormalizedInvoice[] = [
+      {
+        id: 'inv_stripe_100',
+        invoiceNumber: 'INV-2024-STRIPE',
+        amountCents: 10000, // $100.00
+        currency: 'USD',
+        issueDate: '2024-09-01',
+        status: 'OPEN',
+        customerName: 'Stripe Client Corp',
+      },
+    ];
+
+    const txs: NormalizedTransaction[] = [
+      {
+        id: 'tx_stripe_9710',
+        bookingDate: '2024-09-02',
+        amountCents: 9710, // $97.10 (gateway fee $2.90 = 2.9% deducted)
+        currency: 'USD',
+        direction: 'INCOMING',
+        counterpartyName: 'Stripe Client Corp',
+        reference: 'Payout for INV-2024-STRIPE',
+        sourceFormat: 'stripe',
+      },
+    ];
+
+    const report = reconcile(txs, invs, { feeTolerancePercentage: 0.03 });
+    expect(report.matches.length).toBe(1);
+    const m = report.matches[0];
+    expect(m.status).toBe('REVIEW_NEEDED');
+    expect(m.level).toBe('FEE_TOLERANCE');
+    expect(m.invoice?.invoiceNumber).toBe('INV-2024-STRIPE');
+    expect(m.inferredFeeCents).toBe(290); // 10000 - 9710 = 290
+    expect(m.feeDeductionCents).toBe(290);
+  });
+
+  it('rejects match if transaction amount falls below invoice.amountCents * (1 - feeTolerancePercentage)', () => {
+    // Entry of $96.00 (9,600 cents) exceeds 3% fee tolerance on $100.00 (10,000 cents)
+    const invs: NormalizedInvoice[] = [
+      {
+        id: 'inv_stripe_100',
+        invoiceNumber: 'INV-2024-STRIPE',
+        amountCents: 10000,
+        currency: 'USD',
+        issueDate: '2024-09-01',
+        status: 'OPEN',
+        customerName: 'Stripe Client Corp',
+      },
+    ];
+
+    const txs: NormalizedTransaction[] = [
+      {
+        id: 'tx_stripe_9600',
+        bookingDate: '2024-09-02',
+        amountCents: 9600, // 4% fee deducted, exceeds 3%
+        currency: 'USD',
+        direction: 'INCOMING',
+        counterpartyName: 'Stripe Client Corp',
+        reference: 'INV-2024-STRIPE',
+        sourceFormat: 'stripe',
+      },
+    ];
+
+    const report = reconcile(txs, invs, { feeTolerancePercentage: 0.03 });
+    expect(report.summary.matchedCount).toBe(0);
+    expect(report.matches[0].status).toBe('UNMATCHED');
+    expect(report.matches[0].invoice).toBeUndefined();
+  });
+
+  it('reconciles gateway-invoices.json fixture correctly with gateway fees and records inferredFeeCents', async () => {
+    const fixtureInvoices = await loadInvoices(join(FIXTURES_DIR, 'invoices/gateway-invoices.json'));
+    expect(fixtureInvoices.length).toBe(2);
+
+    const txs: NormalizedTransaction[] = [
+      {
+        id: 'tx_gateway_fixture',
+        bookingDate: '2024-09-02',
+        amountCents: 9710, // $97.10 against $100.00 invoice
+        currency: 'USD',
+        direction: 'INCOMING',
+        counterpartyName: 'Stripe Client Corp',
+        reference: 'INV-GATEWAY-100 payout',
+        sourceFormat: 'stripe',
+      },
+    ];
+
+    const report = reconcile(txs, fixtureInvoices, { feeTolerancePercentage: 0.03 });
+    expect(report.summary.reviewNeededCount).toBe(1);
+    const m = report.matches[0];
+    expect(m.invoice?.invoiceNumber).toBe('INV-GATEWAY-100');
+    expect(m.inferredFeeCents).toBe(290); // 10000 - 9710 = 290 cents
   });
 
   it('does not assign MATCHED status to transaction INV-2024-1006 (Zalando) against invoice INV-2024-501 (Siemens)', () => {

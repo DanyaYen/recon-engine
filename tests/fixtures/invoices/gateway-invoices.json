@@ -1,0 +1,24 @@
+[
+  {
+    "id": "inv_gateway_100",
+    "invoiceNumber": "INV-GATEWAY-100",
+    "amountCents": 10000,
+    "currency": "USD",
+    "issueDate": "2024-09-01",
+    "dueDate": "2024-09-15",
+    "status": "OPEN",
+    "customerName": "Stripe Client Corp",
+    "customerEmail": "billing@stripeclient.com"
+  },
+  {
+    "id": "inv_gateway_500",
+    "invoiceNumber": "INV-GATEWAY-500",
+    "amountCents": 50000,
+    "currency": "USD",
+    "issueDate": "2024-09-01",
+    "dueDate": "2024-09-15",
+    "status": "OPEN",
+    "customerName": "Acme SaaS LLC",
+    "customerEmail": "ap@acmesaas.com"
+  }
+]

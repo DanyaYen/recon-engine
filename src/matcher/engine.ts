@@ -6,19 +6,14 @@ import type {
   MatchStatus,
   MatchResult,
   ReconciliationReport,
+  MatcherOptions,
 } from '../schemas/reconciliation.js';
 import { scoreRemittanceMatch, computeCompanySimilarity } from '../utils/fuzzy.js';
 import { cleanCompanyName, stripInvoicePrefix } from '../utils/text.js';
 import { formatCents } from '../utils/money.js';
 import { getDayDifference } from '../utils/date.js';
 
-export interface MatcherOptions {
-  dateToleranceDays?: number; // default: 2 days (as specified in requirements)
-  feeToleranceCents?: number; // default: 2500 cents (25.00 EUR/USD)
-  feeTolerancePercent?: number; // default: 2%
-  statementFile?: string;
-  sourceFormat?: string;
-}
+export type { MatcherOptions } from '../schemas/reconciliation.js';
 
 /**
  * Checks if the remittance reference contains an exact match of the invoice number
@@ -86,6 +81,7 @@ interface CandidatePair {
   status: MatchStatus;
   discrepancies: string[];
   feeDeductionCents?: number;
+  inferredFeeCents?: number;
   requiresForce?: boolean;
 }
 
@@ -102,8 +98,18 @@ export function reconcile(
   options?: MatcherOptions
 ): ReconciliationReport {
   const dateTolerance = options?.dateToleranceDays ?? 2;
-  const feeToleranceCents = options?.feeToleranceCents ?? 2500;
-  const feeTolerancePercent = options?.feeTolerancePercent ?? 0.02;
+  const feeToleranceCents =
+    options?.feeToleranceCents !== undefined
+      ? options.feeToleranceCents
+      : options?.feeTolerancePercentage !== undefined
+        ? 0
+        : 2500;
+  const feeTolerancePercent =
+    options?.feeTolerancePercentage !== undefined
+      ? options.feeTolerancePercentage
+      : options?.feeTolerancePercent !== undefined
+        ? options.feeTolerancePercent
+        : 0.02;
 
   // Separate incoming and outgoing transactions
   const incomingTxs = transactions.filter((tx) => tx.direction === 'INCOMING');
@@ -342,9 +348,10 @@ export function reconcile(
         if (!bestCandidate && dayDiff <= dateTolerance + 2) {
           const amountDiffCents = inv.amountCents - tx.amountCents;
           if (amountDiffCents > 0) {
-            const diffPercent = amountDiffCents / inv.amountCents;
+            const minAllowedAmount = Math.floor(inv.amountCents * (1 - feeTolerancePercent));
             const withinFeeLimit =
-              amountDiffCents <= feeToleranceCents || diffPercent <= feeTolerancePercent;
+              (feeToleranceCents > 0 && amountDiffCents <= feeToleranceCents) ||
+              (feeTolerancePercent > 0 && tx.amountCents >= minAllowedAmount);
 
             if (withinFeeLimit) {
               const { score, reason } = scoreRemittanceMatch(
@@ -382,6 +389,7 @@ export function reconcile(
                   level: 'FEE_TOLERANCE',
                   status: 'REVIEW_NEEDED',
                   feeDeductionCents: amountDiffCents,
+                  inferredFeeCents: amountDiffCents,
                   discrepancies,
                   requiresForce: isRiskyCounterparty ? true : undefined,
                 };
@@ -465,6 +473,7 @@ export function reconcile(
           level: cand.level,
           confidenceScore: cand.confidenceScore,
           feeDeductionCents: cand.feeDeductionCents,
+          inferredFeeCents: cand.inferredFeeCents,
           transaction: cand.tx,
           invoice: cand.invoice,
           discrepancies: [
@@ -482,6 +491,7 @@ export function reconcile(
             level: comp.level,
             confidenceScore: comp.confidenceScore,
             feeDeductionCents: comp.feeDeductionCents,
+            inferredFeeCents: comp.inferredFeeCents,
             transaction: comp.tx,
             invoice: comp.invoice,
             discrepancies: [
@@ -531,6 +541,7 @@ export function reconcile(
           level: cand.level,
           confidenceScore: isFeeTolerance ? 0.65 : cand.confidenceScore,
           feeDeductionCents: cand.feeDeductionCents,
+          inferredFeeCents: cand.inferredFeeCents,
           transaction: cand.tx,
           invoice: cand.invoice,
           discrepancies,
@@ -548,6 +559,7 @@ export function reconcile(
         level: cand.level,
         confidenceScore: cand.confidenceScore,
         feeDeductionCents: cand.feeDeductionCents,
+        inferredFeeCents: cand.inferredFeeCents,
         transaction: cand.tx,
         invoice: cand.invoice,
         discrepancies: cand.discrepancies,

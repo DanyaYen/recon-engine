@@ -162,6 +162,7 @@ program
   .requiredOption('-i, --invoices <file>', 'Path to invoices file (JSON or CSV conforming to NormalizedInvoice)')
   .option('-d, --date-tolerance <days>', 'Date tolerance window in days (default: 2)', '2')
   .option('--fee-tolerance <cents>', 'Max allowed wire fee discrepancy in cents (default: 2500 / 25.00 EUR)', '2500')
+  .option('--fee-tolerance-percentage <fraction>', 'Max allowed gateway/processing fee tolerance percentage (e.g. 0.03 for 3%)')
   .option('-y, --yes', 'Automatically confirm all suggested REVIEW_NEEDED matches without prompting')
   .option('--force', 'Force auto-confirmation of risky counterparty matches when used with --yes')
   .option('--non-interactive', 'Do not run interactive prompts; leave REVIEW_NEEDED items as is')
@@ -187,13 +188,17 @@ program
       const invoices = await loadInvoices(options.invoices);
 
       const dateToleranceDays = parseInt(options.dateTolerance, 10) || 2;
-      const feeToleranceCents = parseInt(options.feeTolerance, 10) || 2500;
+      const feeToleranceCents = parseInt(options.feeTolerance, 10);
+      const feeTolerancePercentage = options.feeTolerancePercentage !== undefined
+        ? parseFloat(options.feeTolerancePercentage)
+        : undefined;
 
       // 3. Reconcile
       const startTime = performance.now();
       const report = reconcile(stmtResult.transactions, invoices, {
         dateToleranceDays,
         feeToleranceCents,
+        feeTolerancePercentage,
         statementFile: options.statement,
         sourceFormat: stmtResult.parserName,
       });

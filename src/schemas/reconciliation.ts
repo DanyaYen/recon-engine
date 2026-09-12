@@ -19,6 +19,7 @@ export const MatchResultSchema = z.object({
   level: MatchLevelSchema,
   confidenceScore: z.number().min(0).max(1),
   feeDeductionCents: z.number().int().nonnegative().optional().describe('Deducted bank wire fee in minor units'),
+  inferredFeeCents: z.number().int().nonnegative().optional().describe('Inferred processing/gateway fee in minor units (invoice - tx)'),
   transaction: NormalizedTransactionSchema,
   invoice: NormalizedInvoiceSchema.optional(),
   discrepancies: z.array(z.string()).default([]),
@@ -27,6 +28,17 @@ export const MatchResultSchema = z.object({
 });
 
 export type MatchResult = z.infer<typeof MatchResultSchema>;
+
+export const MatcherOptionsSchema = z.object({
+  dateToleranceDays: z.number().nonnegative().optional(),
+  feeToleranceCents: z.number().int().nonnegative().optional(),
+  feeTolerancePercent: z.number().min(0).max(1).optional(),
+  feeTolerancePercentage: z.number().min(0).max(1).optional(),
+  statementFile: z.string().optional(),
+  sourceFormat: z.string().optional(),
+});
+
+export type MatcherOptions = z.infer<typeof MatcherOptionsSchema>;
 
 export const ReconciliationReportSchema = z.object({
   id: z.string().uuid(),

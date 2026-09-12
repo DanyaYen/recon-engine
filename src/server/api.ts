@@ -36,6 +36,7 @@ export const MatchRequestSchema = z.object({
   dateToleranceDays: z.coerce.number().int().nonnegative().optional().default(2),
   feeToleranceCents: z.coerce.number().int().nonnegative().optional().default(2500),
   feeTolerancePercent: z.coerce.number().min(0).max(1).optional(),
+  feeTolerancePercentage: z.coerce.number().min(0).max(1).optional(),
 });
 
 export type MatchRequest = z.infer<typeof MatchRequestSchema>;
@@ -140,6 +141,7 @@ export function createServerApp() {
           dateToleranceDays: payload.dateToleranceDays,
           feeToleranceCents: payload.feeToleranceCents,
           feeTolerancePercent: payload.feeTolerancePercent,
+          feeTolerancePercentage: payload.feeTolerancePercentage,
           sourceFormat: stmtResult.parserName,
         });
 
