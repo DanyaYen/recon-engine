@@ -9,7 +9,13 @@ import type {
   MatcherOptions,
 } from '../schemas/reconciliation.js';
 import { scoreRemittanceMatch, computeCompanySimilarity } from '../utils/fuzzy.js';
-import { cleanCompanyName, stripInvoicePrefix } from '../utils/text.js';
+import {
+  cleanCompanyName,
+  stripInvoicePrefix,
+  extractInvoiceCandidates,
+  normalizeRemittance,
+  STOP_WORDS,
+} from '../utils/text.js';
 import { formatCents } from '../utils/money.js';
 import { getDayDifference } from '../utils/date.js';
 
@@ -101,6 +107,107 @@ function findInvoicesInAmountRange(
   return result;
 }
 
+const STOP_WORDS_SET = new Set(STOP_WORDS.map((s) => s.toLowerCase()));
+
+function isValidToken(token: string): boolean {
+  if (!token || token.length < 2) return false;
+  if (/^\d{4}$/.test(token)) return false;
+  if (STOP_WORDS_SET.has(token.toLowerCase())) return false;
+  return true;
+}
+
+function extractInvoiceTokens(inv: NormalizedInvoice): Set<string> {
+  const tokens = new Set<string>();
+  const add = (raw: string | undefined) => {
+    if (!raw) return;
+    const lower = raw.trim().toLowerCase();
+    if (!isValidToken(lower)) return;
+    tokens.add(lower);
+
+    const alphaNum = lower.replace(/[^a-z0-9]/g, '');
+    if (alphaNum !== lower && isValidToken(alphaNum)) {
+      tokens.add(alphaNum);
+    }
+
+    const parts = lower.split(/[^a-z0-9]+/);
+    for (const p of parts) {
+      if (isValidToken(p)) {
+        tokens.add(p);
+      }
+    }
+  };
+
+  add(inv.invoiceNumber);
+  const stripped = stripInvoicePrefix(inv.invoiceNumber);
+  if (stripped) add(stripped);
+  add(inv.id);
+
+  const comp = cleanCompanyName(inv.customerName);
+  if (comp) {
+    add(comp);
+    const parts = comp.split(/\s+/);
+    for (const p of parts) {
+      if (isValidToken(p)) tokens.add(p);
+    }
+  }
+
+  return tokens;
+}
+
+function extractTransactionTokens(tx: NormalizedTransaction): Set<string> {
+  const tokens = new Set<string>();
+  const add = (raw: string | undefined) => {
+    if (!raw) return;
+    const lower = raw.trim().toLowerCase();
+    if (!isValidToken(lower)) return;
+    tokens.add(lower);
+
+    const alphaNum = lower.replace(/[^a-z0-9]/g, '');
+    if (alphaNum !== lower && isValidToken(alphaNum)) {
+      tokens.add(alphaNum);
+    }
+
+    const parts = lower.split(/[^a-z0-9]+/);
+    for (const p of parts) {
+      if (isValidToken(p)) {
+        tokens.add(p);
+      }
+    }
+  };
+
+  if (tx.reference) {
+    const candidates = extractInvoiceCandidates(tx.reference);
+    for (const cand of candidates) {
+      add(cand);
+      const stripped = stripInvoicePrefix(cand);
+      if (stripped) add(stripped);
+    }
+
+    add(tx.reference);
+    const norm = normalizeRemittance(tx.reference);
+    if (norm) add(norm);
+  }
+
+  if (tx.counterpartyName) {
+    const comp = cleanCompanyName(tx.counterpartyName);
+    if (comp) {
+      add(comp);
+      const compParts = comp.split(/\s+/);
+      for (const cp of compParts) {
+        if (isValidToken(cp)) {
+          tokens.add(cp);
+        }
+      }
+    }
+  }
+
+  if (tx.bankTransactionId) {
+    add(tx.bankTransactionId);
+  }
+
+  return tokens;
+}
+
 interface CandidatePair {
   tx: NormalizedTransaction;
   invoice: NormalizedInvoice;
@@ -184,7 +291,7 @@ export function reconcile(
     registerRef(inv.invoiceNumber, inv);
     registerRef(inv.id, inv);
 
-    const key = `${inv.currency}:${inv.amountCents}`;
+    const key = `${inv.currency}_${inv.amountCents}`;
     const list = invoicesByAmount.get(key);
     if (list) {
       list.push(inv);
@@ -240,13 +347,27 @@ export function reconcile(
   const remainingInvoices = invoices.filter((inv) => !matchedInvoiceIds.has(inv.id));
 
   if (remainingTxs.length > 0 && remainingInvoices.length > 0) {
-    // Index remaining invoices by currency:amountCents for O(1) exact amount lookup
+    // Index remaining invoices by currency_amountCents for O(1) exact amount lookup
     const remainingByAmount = new Map<string, NormalizedInvoice[]>();
     // Group remaining invoices by currency sorted by amountCents for range lookups
     const remainingSortedByCurrency = new Map<string, NormalizedInvoice[]>();
 
+    // Inverted token index: Map<token, Set<invoiceId>> for Pass 2 candidate pruning
+    const invertedTokenIndex = new Map<string, Set<string>>();
     for (const inv of remainingInvoices) {
-      const key = `${inv.currency}:${inv.amountCents}`;
+      const tokens = extractInvoiceTokens(inv);
+      for (const t of tokens) {
+        let set = invertedTokenIndex.get(t);
+        if (!set) {
+          set = new Set<string>();
+          invertedTokenIndex.set(t, set);
+        }
+        set.add(inv.id);
+      }
+    }
+
+    for (const inv of remainingInvoices) {
+      const key = `${inv.currency}_${inv.amountCents}`;
       const list = remainingByAmount.get(key);
       if (list) {
         list.push(inv);
@@ -273,8 +394,20 @@ export function reconcile(
       const txCandidates: CandidatePair[] = [];
       let maxCandidateScore = 0;
 
+      // Extract transaction tokens and query inverted token index for candidate invoice IDs
+      const txTokens = extractTransactionTokens(tx);
+      const overlappingInvoiceIds = new Set<string>();
+      for (const t of txTokens) {
+        const invIds = invertedTokenIndex.get(t);
+        if (invIds) {
+          for (const id of invIds) {
+            overlappingInvoiceIds.add(id);
+          }
+        }
+      }
+
       // STAGE 2: Exact amount candidates
-      const exactAmountInvoices = remainingByAmount.get(`${tx.currency}:${tx.amountCents}`) || [];
+      const exactAmountInvoices = remainingByAmount.get(`${tx.currency}_${tx.amountCents}`) || [];
 
       for (const inv of exactAmountInvoices) {
         if (matchedInvoiceIds.has(inv.id)) continue;
@@ -337,6 +470,11 @@ export function reconcile(
         }
 
         // 3. STAGE 3A: Fuzzy Text Match (Jaro-Winkler) (>= 0.70)
+        // Skip expensive fuzzy string match if there is no token overlap between tx and invoice
+        if (!overlappingInvoiceIds.has(inv.id)) {
+          continue;
+        }
+
         const { score, reason, hasInvoiceReference } = scoreRemittanceMatch(
           tx.reference,
           tx.counterpartyName,
@@ -485,6 +623,7 @@ export function reconcile(
 
             for (const inv of feeCandidateInvoices) {
               if (matchedInvoiceIds.has(inv.id)) continue;
+              if (!overlappingInvoiceIds.has(inv.id)) continue;
 
               const dayDiffIssue = getDayDifference(tx.bookingDate, inv.issueDate);
               const dayDiffDue = inv.dueDate ? getDayDifference(tx.bookingDate, inv.dueDate) : Infinity;

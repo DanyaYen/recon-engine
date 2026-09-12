@@ -25,7 +25,7 @@ const LEGAL_SUFFIXES = [
   'cie',
 ];
 
-const STOP_WORDS = [
+export const STOP_WORDS = [
   'eref',
   'svwz',
   'kref',
