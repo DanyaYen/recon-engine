@@ -1,8 +1,67 @@
 import { XMLParser } from 'fast-xml-parser';
 import type { StatementParser, ParseOptions } from '../base.js';
-import type { NormalizedTransaction } from '../../schemas/transaction.js';
+import type { NormalizedTransaction, TransactionDirection } from '../../schemas/transaction.js';
 import { parseAmountToCents } from '../../utils/money.js';
 import { parseBankDate } from '../../utils/date.js';
+
+function extractAmountNode(node: any): { rawAmount?: string; currency?: string } | null {
+  if (!node) return null;
+
+  const amtNode =
+    node.Amt ||
+    node.AmtDtls?.TxAmt?.Amt ||
+    node.AmtDtls?.InstdAmt?.Amt ||
+    node.AmtDtls?.Amt;
+
+  if (!amtNode) return null;
+
+  const rawAmount = typeof amtNode === 'object' ? amtNode['#text'] : amtNode;
+  const currency = typeof amtNode === 'object' ? amtNode['@_Ccy'] : undefined;
+
+  if (rawAmount !== undefined && rawAmount !== null && String(rawAmount).trim() !== '') {
+    return {
+      rawAmount: String(rawAmount).trim(),
+      currency: currency ? String(currency).toUpperCase() : undefined,
+    };
+  }
+  return null;
+}
+
+function extractReferenceFromTx(tx: any, ntry?: any): string | undefined {
+  const rmtInf = tx?.RmtInf;
+  let ref: string | undefined = undefined;
+
+  if (rmtInf?.Ustrd) {
+    ref = Array.isArray(rmtInf.Ustrd) ? rmtInf.Ustrd.join(' ') : String(rmtInf.Ustrd);
+  } else if (rmtInf?.Strd?.CdtrRefInf?.Ref) {
+    ref = String(rmtInf.Strd.CdtrRefInf.Ref);
+  } else if (tx?.AddtlTxInf) {
+    ref = String(tx.AddtlTxInf);
+  } else if (ntry?.AddtlNtryInf) {
+    ref = String(ntry.AddtlNtryInf);
+  }
+
+  return ref?.trim() || undefined;
+}
+
+function extractCounterparty(tx: any, direction: TransactionDirection): { name?: string; iban?: string } {
+  const rltdPties = tx?.RltdPties;
+  if (!rltdPties) return {};
+
+  const isIncoming = direction === 'INCOMING';
+  const primaryParty = isIncoming ? rltdPties.Dbtr : rltdPties.Cdtr;
+  const fallbackParty = isIncoming ? rltdPties.Cdtr : rltdPties.Dbtr;
+  const party = primaryParty?.Nm ? primaryParty : fallbackParty;
+
+  const primaryAcct = isIncoming ? rltdPties.DbtrAcct : rltdPties.CdtrAcct;
+  const fallbackAcct = isIncoming ? rltdPties.CdtrAcct : rltdPties.DbtrAcct;
+  const partyAcct = primaryAcct?.Id?.IBAN ? primaryAcct : fallbackAcct;
+
+  return {
+    name: party?.Nm || undefined,
+    iban: partyAcct?.Id?.IBAN || undefined,
+  };
+}
 
 export class Camt053Parser implements StatementParser {
   readonly id = 'camt053';
@@ -13,7 +72,7 @@ export class Camt053Parser implements StatementParser {
     const head = content.slice(0, 1500).toLowerCase();
     return (
       (head.includes('camt.053') || head.includes('bktocstmrstmt')) &&
-      head.includes('<document')
+      /<([a-z0-9_-]+:)?document\b/i.test(head)
     );
   }
 
@@ -23,6 +82,7 @@ export class Camt053Parser implements StatementParser {
       attributeNamePrefix: '@_',
       trimValues: true,
       parseTagValue: false, // Keep raw strings to preserve precision
+      removeNSPrefix: true,
     });
 
     const parsed = parser.parse(content);
@@ -44,89 +104,191 @@ export class Camt053Parser implements StatementParser {
         const ntry = entries[ntryIdx];
 
         // Booking date: <BookgDt><Dt>2024-09-01</Dt></BookgDt>
-        const rawDate =
+        const rawNtryDate =
           ntry?.BookgDt?.Dt ||
           ntry?.BookgDt?.DtTm ||
           ntry?.ValDt?.Dt ||
           ntry?.ValDt?.DtTm;
-        const bookingDate = parseBankDate(rawDate);
+        const ntryBookingDate = parseBankDate(rawNtryDate);
 
         // Value date
-        const rawValDate = ntry?.ValDt?.Dt || ntry?.ValDt?.DtTm;
-        const valueDate = rawValDate ? parseBankDate(rawValDate) : undefined;
+        const rawNtryValDate = ntry?.ValDt?.Dt || ntry?.ValDt?.DtTm;
+        const ntryValueDate = rawNtryValDate ? parseBankDate(rawNtryValDate) : undefined;
 
-        // Amount and Currency
-        const amtNode = ntry?.Amt;
-        const rawAmount = typeof amtNode === 'object' ? amtNode['#text'] : amtNode;
-        const currency = (
-          (typeof amtNode === 'object' ? amtNode['@_Ccy'] : undefined) || 'EUR'
-        ).toUpperCase();
+        // Parent Entry Amount and Currency
+        const parentAmt = extractAmountNode(ntry);
+        const parentRawAmount = parentAmt?.rawAmount || '0';
+        const parentCurrency = parentAmt?.currency || 'EUR';
 
         // Direction: CRDT (credit = incoming) vs DBIT (debit = outgoing)
-        const cdtDbtInd = (ntry?.CdtDbtInd || 'CRDT').toUpperCase();
-        const direction = cdtDbtInd.includes('CRDT') ? 'INCOMING' : 'OUTGOING';
-        const { amountCents } = parseAmountToCents(rawAmount || '0', direction);
+        const ntryCdtDbtInd = (ntry?.CdtDbtInd || 'CRDT').toUpperCase();
+        const baseNtryDirection: TransactionDirection = ntryCdtDbtInd.includes('CRDT') ? 'INCOMING' : 'OUTGOING';
+
+        // Reversal Indicator: <RvslInd>true</RvslInd>
+        const ntryIsReversal =
+          String(ntry?.RvslInd).toLowerCase() === 'true' || String(ntry?.RvslInd) === '1';
 
         // Transaction Details (<NtryDtls> -> <TxDtls>)
         const ntryDtls = ntry?.NtryDtls;
-        const txDtlsList = ntryDtls?.TxDtls
-          ? Array.isArray(ntryDtls.TxDtls)
-            ? ntryDtls.TxDtls
-            : [ntryDtls.TxDtls]
-          : [{}];
+        const rawTxDtls = ntryDtls?.TxDtls;
+        const txDtlsList: any[] = rawTxDtls
+          ? Array.isArray(rawTxDtls)
+            ? rawTxDtls
+            : [rawTxDtls]
+          : [];
 
-        for (let txIdx = 0; txIdx < txDtlsList.length; txIdx++) {
-          const tx = txDtlsList[txIdx];
+        // Check whether multiple TxDtls exist and whether any has its own Amt
+        const hasIndividualAmounts =
+          txDtlsList.length > 0 && txDtlsList.some((tx) => extractAmountNode(tx) !== null);
 
-          // Counterparty name and IBAN
-          const rltdPties = tx?.RltdPties;
-          const isIncoming = direction === 'INCOMING';
+        if (txDtlsList.length > 1 && !hasIndividualAmounts) {
+          // Multiple TxDtls without individual amounts:
+          // Treat Ntry as a single transaction to prevent duplicating the parent Ntry amount across all of them
+          const direction: TransactionDirection = ntryIsReversal
+            ? baseNtryDirection === 'INCOMING'
+              ? 'OUTGOING'
+              : 'INCOMING'
+            : baseNtryDirection;
 
-          const party = isIncoming ? rltdPties?.Dbtr : rltdPties?.Cdtr;
-          const partyAcct = isIncoming ? rltdPties?.DbtrAcct : rltdPties?.CdtrAcct;
+          const { amountCents } = parseAmountToCents(parentRawAmount, direction);
 
-          const counterpartyName = party?.Nm || undefined;
-          const counterpartyIban = partyAcct?.Id?.IBAN || undefined;
+          // Combine references from all TxDtls
+          const refs: string[] = [];
+          for (const tx of txDtlsList) {
+            const ref = extractReferenceFromTx(tx);
+            if (ref && !refs.includes(ref)) {
+              refs.push(ref);
+            }
+          }
+          if (ntry?.AddtlNtryInf) {
+            const ntryRef = String(ntry.AddtlNtryInf).trim();
+            if (ntryRef && !refs.includes(ntryRef)) {
+              refs.push(ntryRef);
+            }
+          }
+          const reference = refs.join(' / ') || undefined;
 
-          // Reference and Remittance Info
-          const rmtInf = tx?.RmtInf;
-          let reference: string | undefined = undefined;
-
-          if (rmtInf?.Ustrd) {
-            reference = Array.isArray(rmtInf.Ustrd)
-              ? rmtInf.Ustrd.join(' ')
-              : String(rmtInf.Ustrd);
-          } else if (rmtInf?.Strd?.CdtrRefInf?.Ref) {
-            reference = String(rmtInf.Strd.CdtrRefInf.Ref);
-          } else if (tx?.AddtlTxInf) {
-            reference = String(tx.AddtlTxInf);
-          } else if (ntry?.AddtlNtryInf) {
-            reference = String(ntry.AddtlNtryInf);
+          // Counterparty from first TxDtls that has it
+          let counterpartyName: string | undefined;
+          let counterpartyIban: string | undefined;
+          for (const tx of txDtlsList) {
+            const cp = extractCounterparty(tx, direction);
+            if (cp.name && !counterpartyName) counterpartyName = cp.name;
+            if (cp.iban && !counterpartyIban) counterpartyIban = cp.iban;
           }
 
-          // Bank / SWIFT Reference ID
+          const firstTx = txDtlsList[0];
           const bankTransactionId =
-            tx?.Refs?.EndToEndId !== 'NOTPROVIDED' && tx?.Refs?.EndToEndId
-              ? String(tx.Refs.EndToEndId)
-              : tx?.Refs?.InstrId || ntry?.AcctSvcrRef || undefined;
+            firstTx?.Refs?.EndToEndId !== 'NOTPROVIDED' && firstTx?.Refs?.EndToEndId
+              ? String(firstTx.Refs.EndToEndId)
+              : firstTx?.Refs?.InstrId || ntry?.AcctSvcrRef || undefined;
 
           const id =
             bankTransactionId ||
-            `camt053-${bookingDate}-${amountCents}-${stmtIdx + 1}-${ntryIdx + 1}-${txIdx + 1}`;
+            `camt053-${ntryBookingDate}-${amountCents}-${stmtIdx + 1}-${ntryIdx + 1}-1`;
 
           transactions.push({
             id,
-            bookingDate,
-            valueDate,
+            bookingDate: ntryBookingDate,
+            valueDate: ntryValueDate,
             amountCents,
-            currency,
+            currency: parentCurrency,
             direction,
             counterpartyName,
             counterpartyIban,
-            reference: reference?.trim() || undefined,
+            reference,
             bankTransactionId,
             sourceFormat: this.id,
-            raw: tx,
+            raw: ntry,
+          });
+        } else if (txDtlsList.length > 0) {
+          // 1 TxDtls, or multiple TxDtls with individual amounts
+          for (let txIdx = 0; txIdx < txDtlsList.length; txIdx++) {
+            const tx = txDtlsList[txIdx];
+
+            // Direction & Reversal check
+            const txCdtDbtInd = tx?.CdtDbtInd ? String(tx.CdtDbtInd).toUpperCase() : ntryCdtDbtInd;
+            const baseDir: TransactionDirection = txCdtDbtInd.includes('CRDT') ? 'INCOMING' : 'OUTGOING';
+            const isReversal =
+              ntryIsReversal ||
+              String(tx?.RvslInd).toLowerCase() === 'true' ||
+              String(tx?.RvslInd) === '1';
+            const direction: TransactionDirection = isReversal
+              ? baseDir === 'INCOMING'
+                ? 'OUTGOING'
+                : 'INCOMING'
+              : baseDir;
+
+            // Amount: use individual TxDtls Amt if present, else fall back to parent Ntry Amt
+            const txAmt = extractAmountNode(tx);
+            const rawAmount = txAmt?.rawAmount || parentRawAmount;
+            const currency = txAmt?.currency || parentCurrency;
+            const { amountCents } = parseAmountToCents(rawAmount, direction);
+
+            // Dates
+            const txRawDate = tx?.BookgDt?.Dt || tx?.BookgDt?.DtTm || rawNtryDate;
+            const bookingDate = parseBankDate(txRawDate);
+            const txRawValDate = tx?.ValDt?.Dt || tx?.ValDt?.DtTm || rawNtryValDate;
+            const valueDate = txRawValDate ? parseBankDate(txRawValDate) : undefined;
+
+            // Counterparty
+            const { name: counterpartyName, iban: counterpartyIban } = extractCounterparty(tx, direction);
+
+            // Reference
+            const reference = extractReferenceFromTx(tx, ntry);
+
+            // Bank / SWIFT Reference ID
+            const bankTransactionId =
+              tx?.Refs?.EndToEndId !== 'NOTPROVIDED' && tx?.Refs?.EndToEndId
+                ? String(tx.Refs.EndToEndId)
+                : tx?.Refs?.InstrId || ntry?.AcctSvcrRef || undefined;
+
+            const id =
+              bankTransactionId ||
+              `camt053-${bookingDate}-${amountCents}-${stmtIdx + 1}-${ntryIdx + 1}-${txIdx + 1}`;
+
+            transactions.push({
+              id,
+              bookingDate,
+              valueDate,
+              amountCents,
+              currency,
+              direction,
+              counterpartyName,
+              counterpartyIban,
+              reference,
+              bankTransactionId,
+              sourceFormat: this.id,
+              raw: tx,
+            });
+          }
+        } else {
+          // No TxDtls sub-details: use parent Ntry level
+          const direction: TransactionDirection = ntryIsReversal
+            ? baseNtryDirection === 'INCOMING'
+              ? 'OUTGOING'
+              : 'INCOMING'
+            : baseNtryDirection;
+
+          const { amountCents } = parseAmountToCents(parentRawAmount, direction);
+          const bankTransactionId = ntry?.AcctSvcrRef ? String(ntry.AcctSvcrRef) : undefined;
+          const id =
+            bankTransactionId ||
+            `camt053-${ntryBookingDate}-${amountCents}-${stmtIdx + 1}-${ntryIdx + 1}-1`;
+
+          transactions.push({
+            id,
+            bookingDate: ntryBookingDate,
+            valueDate: ntryValueDate,
+            amountCents,
+            currency: parentCurrency,
+            direction,
+            counterpartyName: undefined,
+            counterpartyIban: undefined,
+            reference: ntry?.AddtlNtryInf ? String(ntry.AddtlNtryInf).trim() : undefined,
+            bankTransactionId,
+            sourceFormat: this.id,
+            raw: ntry,
           });
         }
       }

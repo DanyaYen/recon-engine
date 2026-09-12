@@ -106,6 +106,49 @@ describe('Universal Statement Parser - Auto Detection and Parsing', () => {
       expect(result.transactions[0].reference).toBe('INV-2024-8891');
       expect(result.transactions[0].counterpartyName).toBe('KPMG Advisory GmbH');
     });
+
+    it('handles prefixed XML namespaces and reverses transaction direction when RvslInd is true', async () => {
+      const content = readFileSync(join(camtDir, 'camt053-prefixed-ns.xml'), 'utf-8');
+      const result = await parseStatement(content);
+      expect(result.transactions.length).toBe(2);
+
+      const [normalTx, reversedTx] = result.transactions;
+      expect(normalTx.amountCents).toBe(150000);
+      expect(normalTx.direction).toBe('INCOMING');
+      expect(normalTx.counterpartyName).toBe('Acme Enterprise GmbH');
+      expect(normalTx.reference).toBe('Invoice INV-2024-PREFIX-1');
+
+      expect(reversedTx.amountCents).toBe(25000);
+      expect(reversedTx.direction).toBe('OUTGOING');
+      expect(reversedTx.counterpartyName).toBe('Reversed Client');
+      expect(reversedTx.reference).toBe('Reversal of returned direct debit');
+    });
+
+    it('parses individual TxDtls amounts without duplicating parent Ntry amount', async () => {
+      const content = readFileSync(join(camtDir, 'camt053-split-txdtls.xml'), 'utf-8');
+      const result = await parseStatement(content);
+      expect(result.transactions.length).toBe(2);
+
+      const [tx1, tx2] = result.transactions;
+      expect(tx1.amountCents).toBe(40000);
+      expect(tx1.counterpartyName).toBe('Client Alpha GmbH');
+      expect(tx1.reference).toBe('Payment Part 1 INV-2024-ALPHA');
+
+      expect(tx2.amountCents).toBe(60000);
+      expect(tx2.counterpartyName).toBe('Client Beta BV');
+      expect(tx2.reference).toBe('Payment Part 2 INV-2024-BETA');
+
+      expect(tx1.amountCents + tx2.amountCents).toBe(100000);
+    });
+
+    it('avoids duplicating parent amount when multiple TxDtls lack individual amounts', async () => {
+      const content = readFileSync(join(camtDir, 'camt053-batch-no-subamt.xml'), 'utf-8');
+      const result = await parseStatement(content);
+      expect(result.transactions.length).toBe(1);
+      expect(result.transactions[0].amountCents).toBe(80000);
+      expect(result.transactions[0].reference).toContain('Sub-item 1');
+      expect(result.transactions[0].reference).toContain('Sub-item 2');
+    });
   });
 
   // 4. SWIFT MT940 fixtures

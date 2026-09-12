@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ns2:Document xmlns:ns2="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <ns2:BkToCstmrStmt>
+    <ns2:GrpHdr>
+      <ns2:MsgId>MSG-PREFIXED-001</ns2:MsgId>
+      <ns2:CreDtTm>2024-09-01T12:00:00Z</ns2:CreDtTm>
+    </ns2:GrpHdr>
+    <ns2:Stmt>
+      <ns2:Id>STMT-PREFIXED-001</ns2:Id>
+      <ns2:Ntry>
+        <ns2:Amt Ccy="EUR">1500.00</ns2:Amt>
+        <ns2:CdtDbtInd>CRDT</ns2:CdtDbtInd>
+        <ns2:BookgDt>
+          <ns2:Dt>2024-09-01</ns2:Dt>
+        </ns2:BookgDt>
+        <ns2:NtryDtls>
+          <ns2:TxDtls>
+            <ns2:RltdPties>
+              <ns2:Dbtr>
+                <ns2:Nm>Acme Enterprise GmbH</ns2:Nm>
+              </ns2:Dbtr>
+            </ns2:RltdPties>
+            <ns2:RmtInf>
+              <ns2:Ustrd>Invoice INV-2024-PREFIX-1</ns2:Ustrd>
+            </ns2:RmtInf>
+          </ns2:TxDtls>
+        </ns2:NtryDtls>
+      </ns2:Ntry>
+      <ns2:Ntry>
+        <ns2:Amt Ccy="EUR">250.00</ns2:Amt>
+        <ns2:CdtDbtInd>CRDT</ns2:CdtDbtInd>
+        <ns2:RvslInd>true</ns2:RvslInd>
+        <ns2:BookgDt>
+          <ns2:Dt>2024-09-02</ns2:Dt>
+        </ns2:BookgDt>
+        <ns2:NtryDtls>
+          <ns2:TxDtls>
+            <ns2:RltdPties>
+              <ns2:Dbtr>
+                <ns2:Nm>Reversed Client</ns2:Nm>
+              </ns2:Dbtr>
+            </ns2:RltdPties>
+            <ns2:RmtInf>
+              <ns2:Ustrd>Reversal of returned direct debit</ns2:Ustrd>
+            </ns2:RmtInf>
+          </ns2:TxDtls>
+        </ns2:NtryDtls>
+      </ns2:Ntry>
+    </ns2:Stmt>
+  </ns2:BkToCstmrStmt>
+</ns2:Document>

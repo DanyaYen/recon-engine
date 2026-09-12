@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt>
+    <GrpHdr>
+      <MsgId>MSG-SPLIT-001</MsgId>
+      <CreDtTm>2024-09-01T12:00:00Z</CreDtTm>
+    </GrpHdr>
+    <Stmt>
+      <Id>STMT-SPLIT-001</Id>
+      <Ntry>
+        <Amt Ccy="EUR">1000.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <BookgDt>
+          <Dt>2024-09-01</Dt>
+        </BookgDt>
+        <NtryDtls>
+          <TxDtls>
+            <Amt Ccy="EUR">400.00</Amt>
+            <RltdPties>
+              <Dbtr>
+                <Nm>Client Alpha GmbH</Nm>
+              </Dbtr>
+            </RltdPties>
+            <RmtInf>
+              <Ustrd>Payment Part 1 INV-2024-ALPHA</Ustrd>
+            </RmtInf>
+          </TxDtls>
+          <TxDtls>
+            <Amt Ccy="EUR">600.00</Amt>
+            <RltdPties>
+              <Dbtr>
+                <Nm>Client Beta BV</Nm>
+              </Dbtr>
+            </RltdPties>
+            <RmtInf>
+              <Ustrd>Payment Part 2 INV-2024-BETA</Ustrd>
+            </RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+    </Stmt>
+  </BkToCstmrStmt>
+</Document>
