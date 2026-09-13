@@ -171,6 +171,29 @@ describe('Universal Statement Parser - Auto Detection and Parsing', () => {
       expect(dbitReversal.counterpartyName).toBe('Reversed Debit Beneficiary');
       expect(dbitReversal.reference).toBe('Reversed Outgoing Wire Fee');
     });
+
+    it('gracefully handles balance-only statements containing <Bal> without <Ntry>', async () => {
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt>
+    <Stmt>
+      <Id>STMT-BAL-ONLY-01</Id>
+      <Acct>
+        <Id><IBAN>DE89370400440532013000</IBAN></Id>
+      </Acct>
+      <Bal>
+        <Tp><CdOrPrtry><Cd>CLBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="EUR">5432.10</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><Dt>2024-09-01</Dt></Dt>
+      </Bal>
+    </Stmt>
+  </BkToCstmrStmt>
+</Document>`;
+      const result = await parseStatement(xml);
+      expect(result.transactions.length).toBe(0);
+      expect(result.rejectedRows.length).toBe(0);
+    });
   });
 
   // 4. SWIFT MT940 fixtures
@@ -235,6 +258,29 @@ describe('Universal Statement Parser - Auto Detection and Parsing', () => {
       expect(tx2.direction).toBe('OUTGOING');
       expect(tx2.reference).toContain('INV-2024-ENV2');
     });
+
+    it('parses German Sparkasse MT940 with /SVWZ/ and irregular continuation lines', async () => {
+      const sparkasseContent = `:20:STARTMR
+:25:DE89370400440532013000
+:28C:00001/001
+:60F:C240901EUR10000,00
+:61:2409020902C1250,50NTRFNONREF//SPARKASSE
+:86:166?00SEPA-GUTSCHRIFT?109999?20EREF+INV-2024-SPK99?21KREF+
+?22KUNDENREFERENZ?32SPARKASSE KUNDE GMBH
+/SVWZ/RECHNUNG INV-2024-SPK99 VOM 01.09
+/IBAN/DE12345678901234567890
+:62F:C240902EUR11250,50
+-}`;
+      const result = await parseStatement(sparkasseContent);
+      expect(result.parserId).toBe('mt940');
+      expect(result.transactions.length).toBe(1);
+      const tx = result.transactions[0];
+      expect(tx.bookingDate).toBe('2024-09-02');
+      expect(tx.amountCents).toBe(125050);
+      expect(tx.direction).toBe('INCOMING');
+      expect(tx.counterpartyName).toContain('SPARKASSE KUNDE GMBH');
+      expect(tx.reference).toContain('INV-2024-SPK99');
+    });
   });
 
   // 5. Generic CSV fixtures
@@ -298,6 +344,21 @@ describe('Universal Statement Parser - Auto Detection and Parsing', () => {
       expect(rejected.error).toBeDefined();
       expect(rejected.error.issues.length).toBeGreaterThan(0);
       expect((rejected.raw as any).counterpartyName || (rejected.raw as any).counterparty).toContain('Bad Date');
+    });
+
+    it('extracts reference from Odoo-style CSV with "Label" column header', async () => {
+      const odooCsv = `Date,Label,Partner,Amount,Currency
+2024-09-10,INV-ODOO-8821 Customer Payment,Acme Corp,450.00,EUR
+2024-09-11,INV-ODOO-8822 Monthly SaaS,Wayne Enterprises,1200.50,EUR`;
+      const result = await parseStatement(odooCsv);
+      expect(result.parserId).toBe('generic-csv');
+      expect(result.transactions.length).toBe(2);
+      expect(result.transactions[0].reference).toBe('INV-ODOO-8821 Customer Payment');
+      expect(result.transactions[0].counterpartyName).toBe('Acme Corp');
+      expect(result.transactions[0].amountCents).toBe(45000);
+      expect(result.transactions[1].reference).toBe('INV-ODOO-8822 Monthly SaaS');
+      expect(result.transactions[1].counterpartyName).toBe('Wayne Enterprises');
+      expect(result.transactions[1].amountCents).toBe(120050);
     });
   });
 });

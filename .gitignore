@@ -4,3 +4,6 @@ video/
 *.tsbuildinfo
 .DS_Store
 *.log
+benchmarks/
+demo.tape
+*.tape

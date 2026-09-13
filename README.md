@@ -7,7 +7,7 @@
 [![Bun](https://img.shields.io/badge/Bun-1.3+-black.svg?logo=bun)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue.svg?logo=typescript)](https://www.typescriptlang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/Tests-129%20passed-success.svg)](./tests)
+[![Tests](https://img.shields.io/badge/Tests-132%20passed-success.svg)](./tests)
 [![AI Ready](https://img.shields.io/badge/AI%20Agents-AGENT.md-purple.svg)](./AGENT.md)
 
 > [!IMPORTANT]

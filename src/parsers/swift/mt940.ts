@@ -77,8 +77,15 @@ export class Mt940Parser implements StatementParser {
         currentTag = tagMatch[1];
         currentTagContent = [tagMatch[2]];
       } else if (currentTag) {
-        // Tag continuation line
-        currentTagContent.push(line);
+        const trimmed = line.trim();
+        if (trimmed === '-}' || trimmed === '-') {
+          commitTag(currentTag, currentTagContent);
+          currentTag = '';
+          currentTagContent = [];
+        } else {
+          // Tag continuation line
+          currentTagContent.push(line);
+        }
       }
     }
 
@@ -152,7 +159,7 @@ export class Mt940Parser implements StatementParser {
     bankRef?: string;
   } | null {
     // Basic regex capturing Date, D/C flag, Amount, and the remainder
-    const match = line.match(/^(\d{6})(\d{4})?(C|D|RC|RD)([A-Za-z])?([0-9]+[.,][0-9]{1,2})(.*?)$/);
+    const match = line.trim().match(/^(\d{6})(\d{4})?(C|D|RC|RD)([A-Za-z])?([0-9]+(?:[.,][0-9]{1,2})?)(.*?)$/);
     if (!match) return null;
 
     const rawDate = match[1];
@@ -204,21 +211,23 @@ export class Mt940Parser implements StatementParser {
   } {
     if (!info) return {};
 
-    // Check for German/Austrian subfield codes: ?00 (transaction code), ?20-29 (remittance), ?32 (counterparty)
-    if (info.includes('?')) {
+    // Check for German/Austrian ZKA subfield codes: ?00 (transaction code), ?20-29 / ?60-63 (remittance), ?32-33 (counterparty), ?38 (IBAN)
+    if (/\?\d{2}/.test(info)) {
       const subfields: Record<string, string> = {};
-      const parts = info.split('?');
+      const parts = info.split(/\?(\d{2})/);
+      const prefixText = parts[0]?.trim();
 
-      for (const part of parts) {
-        if (part.length >= 2) {
-          const code = part.slice(0, 2);
-          const val = part.slice(2).trim();
+      for (let i = 1; i < parts.length; i += 2) {
+        const code = parts[i];
+        const val = (parts[i + 1] || '').replace(/[\r\n]+/g, ' ').trim();
+        if (code) {
           subfields[code] = (subfields[code] ? subfields[code] + ' ' : '') + val;
         }
       }
 
-      const counterpartyName = subfields['32'] || subfields['33'] || undefined;
-      const counterpartyIban = subfields['38'] || undefined;
+      const counterpartyName =
+        [subfields['32'], subfields['33']].filter(Boolean).join(' ').trim() || undefined;
+      const counterpartyIban = subfields['38'] ? subfields['38'].replace(/\s+/g, '') : undefined;
 
       const refParts = [
         subfields['20'],
@@ -227,29 +236,65 @@ export class Mt940Parser implements StatementParser {
         subfields['23'],
         subfields['24'],
         subfields['25'],
+        subfields['26'],
+        subfields['27'],
+        subfields['28'],
+        subfields['29'],
+        subfields['60'],
+        subfields['61'],
+        subfields['62'],
+        subfields['63'],
       ].filter(Boolean);
 
-      const reference = refParts.join(' ').trim() || undefined;
+      let reference = refParts.join(' ').trim() || undefined;
+
+      if (!reference) {
+        reference = prefixText || info.replace(/[\r\n]+/g, ' ').trim();
+      }
 
       return { reference, counterpartyName, counterpartyIban };
     }
 
-    // Check for slash tags: /EREF/, /BENM/, /IBAN/
+    // Check for slash tags: /SVWZ/, /EREF/, /BENM/, /IBAN/, /KREF/
     if (info.includes('/')) {
-      const refMatch = info.match(/\/EREF\/([^\/]+)/);
-      const benmMatch = info.match(/\/BENM\/([^\/]+)/);
+      const svwzMatch = info.match(/\/SVWZ\/([^\/]+)/);
+      const erefMatch = info.match(/\/EREF\/([^\/]+)/);
+      const krefMatch = info.match(/\/KREF\/([^\/]+)/);
+      const benmMatch = info.match(/\/(?:BENM|ABWE|ABWA)\/([^\/]+)/);
       const ibanMatch = info.match(/\/IBAN\/([^\/]+)/);
 
+      let reference: string | undefined;
+      const cleanEref = erefMatch && erefMatch[1].trim() !== 'NONREF' ? erefMatch[1].trim() : undefined;
+      const cleanSvwz = svwzMatch ? svwzMatch[1].replace(/[\r\n]+/g, ' ').trim() : undefined;
+      const cleanKref = krefMatch && krefMatch[1].trim() !== 'NONREF' ? krefMatch[1].trim() : undefined;
+
+      if (cleanSvwz && cleanEref) {
+        reference = `${cleanEref} ${cleanSvwz}`;
+      } else if (cleanSvwz) {
+        reference = cleanSvwz;
+      } else if (cleanEref) {
+        reference = cleanEref;
+      } else if (cleanKref) {
+        reference = cleanKref;
+      }
+
+      const counterpartyName = benmMatch
+        ? benmMatch[1].replace(/[\r\n]+/g, ' ').trim()
+        : undefined;
+      const counterpartyIban = ibanMatch
+        ? ibanMatch[1].replace(/[\s\r\n]+/g, '')
+        : undefined;
+
       return {
-        reference: refMatch ? refMatch[1].trim() : info.replace(/\n/g, ' ').trim(),
-        counterpartyName: benmMatch ? benmMatch[1].trim() : undefined,
-        counterpartyIban: ibanMatch ? ibanMatch[1].trim() : undefined,
+        reference: reference || info.replace(/[\r\n]+/g, ' ').trim(),
+        counterpartyName,
+        counterpartyIban,
       };
     }
 
     // Plain unstructured text
     return {
-      reference: info.replace(/\n/g, ' ').trim(),
+      reference: info.replace(/[\r\n]+/g, ' ').trim(),
     };
   }
 }

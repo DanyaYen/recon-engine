@@ -103,16 +103,35 @@ export class Camt053Parser implements StatementParser {
     const bkStmt = documentNode?.BkToCstmrStmt || parsed?.BkToCstmrStmt;
 
     if (!bkStmt) {
+      if (/<bal\b/i.test(content) && !/<ntry\b/i.test(content)) {
+        return [];
+      }
       throw new Error('Invalid CAMT.053 format: missing BkToCstmrStmt node');
     }
 
-    const stmts = Array.isArray(bkStmt.Stmt) ? bkStmt.Stmt : bkStmt.Stmt ? [bkStmt.Stmt] : [];
+    const stmts = Array.isArray(bkStmt.Stmt)
+      ? bkStmt.Stmt
+      : bkStmt.Stmt
+      ? [bkStmt.Stmt]
+      : bkStmt.Bal
+      ? [{ Bal: bkStmt.Bal }]
+      : [];
+
+    if (stmts.length === 0) {
+      return [];
+    }
+
     const transactions: NormalizedTransaction[] = [];
 
     for (let stmtIdx = 0; stmtIdx < stmts.length; stmtIdx++) {
       const stmt = stmts[stmtIdx];
+      if (!stmt || !stmt.Ntry) {
+        // Guard against balance-only statements containing <Bal> without any <Ntry> rows
+        continue;
+      }
+
       const accountIban = stmt?.Acct?.Id?.IBAN ? String(stmt.Acct.Id.IBAN) : undefined;
-      const entries = Array.isArray(stmt.Ntry) ? stmt.Ntry : stmt.Ntry ? [stmt.Ntry] : [];
+      const entries = Array.isArray(stmt.Ntry) ? stmt.Ntry : [stmt.Ntry];
 
       for (let ntryIdx = 0; ntryIdx < entries.length; ntryIdx++) {
         const ntry = entries[ntryIdx];
