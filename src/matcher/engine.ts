@@ -267,11 +267,11 @@ export function reconcile(
 
   // =========================================================================
   // INDEXING: Invoices Pre-indexing
-  // - exact reference index: Map<normalizedReference, NormalizedInvoice | 'AMBIGUOUS'>
-  // - bucket map for amounts: Map<currency_amountCents, NormalizedInvoice[]>
+  // - exactRefMap: Map<string, NormalizedInvoice | 'AMBIGUOUS'>
+  // - bucketMap: Map<string, NormalizedInvoice[]> keyed by `${currency}_${amountCents}`
   // =========================================================================
-  const exactRefIndex = new Map<string, NormalizedInvoice | 'AMBIGUOUS'>();
-  const invoicesByAmount = new Map<string, NormalizedInvoice[]>();
+  const exactRefMap = new Map<string, NormalizedInvoice | 'AMBIGUOUS'>();
+  const bucketMap = new Map<string, NormalizedInvoice[]>();
 
   function registerRef(key: string | undefined, inv: NormalizedInvoice) {
     if (!key) return;
@@ -279,11 +279,11 @@ export function reconcile(
     if (clean.length < 3) return;
 
     const add = (k: string) => {
-      const existing = exactRefIndex.get(k);
+      const existing = exactRefMap.get(k);
       if (!existing) {
-        exactRefIndex.set(k, inv);
+        exactRefMap.set(k, inv);
       } else if (existing !== 'AMBIGUOUS' && existing.id !== inv.id) {
-        exactRefIndex.set(k, 'AMBIGUOUS');
+        exactRefMap.set(k, 'AMBIGUOUS');
       }
     };
 
@@ -303,22 +303,22 @@ export function reconcile(
     registerRef(inv.id, inv);
 
     const key = `${inv.currency}_${inv.amountCents}`;
-    const list = invoicesByAmount.get(key);
+    const list = bucketMap.get(key);
     if (list) {
       list.push(inv);
     } else {
-      invoicesByAmount.set(key, [inv]);
+      bucketMap.set(key, [inv]);
     }
   }
 
   // =========================================================================
-  // STAGE 1: EXACT REFERENCE MATCH (O(1) per transaction)
-  // If reference matches, claim immediately.
+  // PHASE 1: O(1) EXACT REFERENCE MATCH
+  // Match transactions that contain an exact invoice reference in remittance or metadata.
   // =========================================================================
   for (const tx of incomingTxs) {
     const keys = extractReferenceKeys(tx);
     for (const key of keys) {
-      const inv = exactRefIndex.get(key);
+      const inv = exactRefMap.get(key);
       if (!inv || inv === 'AMBIGUOUS' || matchedInvoiceIds.has(inv.id)) {
         continue;
       }
@@ -352,7 +352,7 @@ export function reconcile(
   }
 
   // =========================================================================
-  // STAGE 1.5: PARTIAL PAYMENT RESIDUAL TRACKING
+  // PHASE 1.5: PARTIAL PAYMENT RESIDUAL TRACKING
   // If reference matches an invoice exactly, but tx.amountCents < invoice.amountCents
   // (and difference > feeTolerance), mark as PARTIAL_MATCH and track remainingCents.
   // =========================================================================
@@ -361,7 +361,7 @@ export function reconcile(
 
     const keys = extractReferenceKeys(tx);
     for (const key of keys) {
-      const inv = exactRefIndex.get(key);
+      const inv = exactRefMap.get(key);
       if (!inv || inv === 'AMBIGUOUS' || matchedInvoiceIds.has(inv.id)) {
         continue;
       }
@@ -436,8 +436,6 @@ export function reconcile(
   const remainingInvoices = invoices.filter((inv) => !matchedInvoiceIds.has(inv.id));
 
   if (remainingTxs.length > 0 && remainingInvoices.length > 0) {
-    // Index remaining invoices by currency_amountCents for O(1) exact amount lookup
-    const remainingByAmount = new Map<string, NormalizedInvoice[]>();
     // Group remaining invoices by currency sorted by amountCents for range lookups
     const remainingSortedByCurrency = new Map<string, NormalizedInvoice[]>();
 
@@ -452,16 +450,6 @@ export function reconcile(
           invertedTokenIndex.set(t, set);
         }
         set.add(inv.id);
-      }
-    }
-
-    for (const inv of remainingInvoices) {
-      const key = `${inv.currency}_${inv.amountCents}`;
-      const list = remainingByAmount.get(key);
-      if (list) {
-        list.push(inv);
-      } else {
-        remainingByAmount.set(key, [inv]);
       }
 
       const cList = remainingSortedByCurrency.get(inv.currency);
@@ -495,8 +483,8 @@ export function reconcile(
         }
       }
 
-      // STAGE 2: Exact amount candidates
-      const exactAmountInvoices = remainingByAmount.get(`${tx.currency}_${tx.amountCents}`) || [];
+      // PHASE 2: O(1) Exact Amount & Currency Bucket
+      const exactAmountInvoices = bucketMap.get(`${tx.currency}_${tx.amountCents}`) || [];
 
       for (const inv of exactAmountInvoices) {
         if (matchedInvoiceIds.has(inv.id)) continue;
@@ -622,7 +610,7 @@ export function reconcile(
         const directCandidates = new Set<NormalizedInvoice>();
         const keys = extractReferenceKeys(tx);
         for (const k of keys) {
-          const inv = exactRefIndex.get(k);
+          const inv = exactRefMap.get(k);
           if (inv && inv !== 'AMBIGUOUS' && !matchedInvoiceIds.has(inv.id) && inv.currency === tx.currency) {
             directCandidates.add(inv);
           }

@@ -16,8 +16,19 @@ export function computeCompanySimilarity(name1: string | undefined, name2: strin
   if (!c1 || !c2) return 0;
   if (c1 === c2 || c1.includes(c2) || c2.includes(c1)) return 1.0;
 
+  const maxLen = Math.max(c1.length, c2.length);
+  const lenDiff = Math.abs(c1.length - c2.length);
+  const maxDistance = Math.floor(maxLen * 0.5);
+
+  // Early exit: skip Levenshtein if difference in string lengths exceeds max distance
+  if (lenDiff > maxDistance) {
+    return 0;
+  }
+
   const jw = jaroWinklerSimilarity(c1, c2);
-  const lev = levenshteinSimilarity(c1, c2);
+  if (jw < 0.4) return 0;
+
+  const lev = levenshteinSimilarity(c1, c2, maxDistance);
   return Math.min(jw, (jw + lev) / 2);
 }
 
@@ -103,13 +114,22 @@ export function jaroWinklerSimilarity(
 
 /**
  * Normalized Levenshtein similarity between two strings: [0.0, 1.0].
+ * Early exit: skips DP table computation if difference in string lengths exceeds maxDistance.
  */
-export function levenshteinSimilarity(s1: string, s2: string): number {
+export function levenshteinSimilarity(s1: string, s2: string, maxDistance?: number): number {
   if (s1 === s2) return 1.0;
   if (s1.length === 0 || s2.length === 0) return 0.0;
 
   const m = s1.length;
   const n = s2.length;
+  const lenDiff = Math.abs(m - n);
+  const maxLen = Math.max(m, n);
+
+  // Early exit: skip Levenshtein if difference in string lengths exceeds max distance
+  if (maxDistance !== undefined && lenDiff > maxDistance) {
+    return Math.max(0, 1 - lenDiff / maxLen);
+  }
+
   const dp: number[] = Array.from({ length: n + 1 }, (_, i) => i);
 
   for (let i = 1; i <= m; i++) {
@@ -127,7 +147,6 @@ export function levenshteinSimilarity(s1: string, s2: string): number {
   }
 
   const distance = dp[n];
-  const maxLen = Math.max(m, n);
   return 1 - distance / maxLen;
 }
 

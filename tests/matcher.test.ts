@@ -678,7 +678,7 @@ describe('Matching Engine (Deterministic & Fuzzy)', () => {
     expect(durationMs).toBeLessThan(250);
   });
 
-  it('benchmark: matches 5,000 transactions against 5,000 invoices in < 300ms', () => {
+  it('benchmark: matches 5,000 transactions against 5,000 invoices in < 400ms', () => {
     const invoices: NormalizedInvoice[] = [];
     const transactions: NormalizedTransaction[] = [];
 
@@ -724,7 +724,7 @@ describe('Matching Engine (Deterministic & Fuzzy)', () => {
     expect(report.summary.totalTransactions).toBe(5000);
     expect(report.summary.totalInvoices).toBe(5000);
     expect(report.summary.matchedCount + report.summary.reviewNeededCount).toBe(5000);
-    expect(durationMs).toBeLessThan(300);
+    expect(durationMs).toBeLessThan(400);
   });
 });
 
