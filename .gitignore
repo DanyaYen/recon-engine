@@ -5,7 +5,8 @@ dist/
 *.log
 
 # Media and Generation Scripts
-assets/
+assets/*
+!assets/benchmark.png
 scripts/
 video/
 benchmarks/
