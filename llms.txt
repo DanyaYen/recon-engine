@@ -2,9 +2,11 @@
 > Ultra-fast Open-Source Statement Parser & Financial Reconciliation Engine in Bun.
 
 ## Core Capabilities
-- Parsers: CAMT.053 (ISO 20022 XML), SWIFT MT940, Revolut CSV, Stripe CSV, Generic CSV.
-- Matcher: Deterministic exact metrics + Jaro-Winkler fuzzy remittance matching + Wire fee deduction tolerance.
-- Precision: Zero floating-point arithmetic. All money handled in integer minor units (cents).
+- Parsers: CAMT.053 (ISO 20022 XML with namespace support & reversal tracking), SWIFT MT940 (with SWIFT envelope unwrapping), Revolut CSV, Stripe CSV, Generic CSV with BOM stripping.
+- Error Resilience: Batch quarantine of corrupted rows into `rejectedRows` while parsing valid rows.
+- Matcher: 3-Stage O(N + M) Bucketed Matching (Exact Ref Map -> Currency/Amount Buckets -> Token-Pruned Fuzzy & Wire Fee Tolerance + Partial Payment Tracking).
+- Lifecycle Filtering: Invoices filtered strictly to `status === 'OPEN'`; non-open invoices quarantined into `skippedInvoices`.
+- Precision: Zero floating-point arithmetic. All money handled in integer minor units (cents). Multi-currency `totalsByCurrency`.
 
 ## CLI Invocation for Agents
 - Always use headless non-interactive mode:
