@@ -271,7 +271,7 @@ export function reconcile(
   // =========================================================================
   // INDEXING: Invoices Pre-indexing
   // - exactRefMap: Map<string, NormalizedInvoice | 'AMBIGUOUS'>
-  // - bucketMap: Map<string, NormalizedInvoice[]> keyed by `${currency}_${amountCents}`
+  // - bucketMap: Map<string, NormalizedInvoice[]> keyed by `${currency}:${amountCents}`
   // =========================================================================
   const exactRefMap = new Map<string, NormalizedInvoice | 'AMBIGUOUS'>();
   const bucketMap = new Map<string, NormalizedInvoice[]>();
@@ -305,7 +305,7 @@ export function reconcile(
     registerRef(inv.invoiceNumber, inv);
     registerRef(inv.id, inv);
 
-    const key = `${inv.currency}_${inv.amountCents}`;
+    const key = `${inv.currency}:${inv.amountCents}`;
     const list = bucketMap.get(key);
     if (list) {
       list.push(inv);
@@ -486,8 +486,8 @@ export function reconcile(
         }
       }
 
-      // PHASE 2: O(1) Exact Amount & Currency Bucket
-      const exactAmountInvoices = bucketMap.get(`${tx.currency}_${tx.amountCents}`) || [];
+      // STAGE 2: O(1) Exact Amount & Currency Bucket
+      const exactAmountInvoices = bucketMap.get(`${tx.currency}:${tx.amountCents}`) || [];
 
       for (const inv of exactAmountInvoices) {
         if (matchedInvoiceIds.has(inv.id)) continue;
@@ -791,17 +791,17 @@ export function reconcile(
       return (levelPriority[b.level] || 0) - (levelPriority[a.level] || 0);
     });
 
-    // Build fast lookup maps for collision checks
-    const candidatesByInvoice = new Map<string, CandidatePair[]>();
-    const candidatesByTx = new Map<string, CandidatePair[]>();
+    // Build fast lookup maps for collision checks (O(P))
+    const candidatesByInvoiceId = new Map<string, CandidatePair[]>();
+    const candidatesByTxId = new Map<string, CandidatePair[]>();
     for (const c of stage2CandidatePool) {
-      const invList = candidatesByInvoice.get(c.invoice.id);
+      const invList = candidatesByInvoiceId.get(c.invoice.id);
       if (invList) invList.push(c);
-      else candidatesByInvoice.set(c.invoice.id, [c]);
+      else candidatesByInvoiceId.set(c.invoice.id, [c]);
 
-      const txList = candidatesByTx.get(c.tx.id);
+      const txList = candidatesByTxId.get(c.tx.id);
       if (txList) txList.push(c);
-      else candidatesByTx.set(c.tx.id, [c]);
+      else candidatesByTxId.set(c.tx.id, [c]);
     }
 
     const SCORE_CLOSE_THRESHOLD = 0.05;
@@ -812,7 +812,7 @@ export function reconcile(
       }
 
       // Check if another transaction claims this invoice with close score
-      const invCandidates = candidatesByInvoice.get(cand.invoice.id) || [];
+      const invCandidates = candidatesByInvoiceId.get(cand.invoice.id) || [];
       const competingForInvoice = invCandidates.filter(
         (c) =>
           c.tx.id !== cand.tx.id &&
@@ -870,7 +870,7 @@ export function reconcile(
       }
 
       // Check if this transaction claims multiple invoices with close score
-      const txCandidates = candidatesByTx.get(cand.tx.id) || [];
+      const txCandidates = candidatesByTxId.get(cand.tx.id) || [];
       const competingForTx = txCandidates.filter(
         (c) =>
           c.invoice.id !== cand.invoice.id &&
