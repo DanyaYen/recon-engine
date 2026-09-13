@@ -116,4 +116,40 @@ describe('HTTP API Server (Elysia)', () => {
     const body: any = await res.json();
     expect(body.error).toBeDefined();
   });
+
+  it('returns 400 on malformed invoice JSON in POST /v1/match and server remains alive for subsequent GET /health requests', async () => {
+    const stmtCsv = `Completed Date,Description,Amount,Fee,Currency,State,Balance,Payer,Beneficiary,Reference\n2024-09-01 10:00:00,Payment,1500.00,0.00,EUR,COMPLETED,1500.00,Acme Corp GmbH,,INV-2024-001`;
+
+    const invalidInvoiceJson = JSON.stringify([
+      {
+        id: 'inv_malformed',
+        invoiceNumber: 'INV-2024-999',
+        amountCents: 1500.5, // Float is invalid for amountCents
+        currency: 'EUR',
+        issueDate: '2024-09-01',
+        customerName: 'Acme Corp',
+      },
+    ]);
+
+    const res = await app.handle(
+      new Request('http://localhost/v1/match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          statement: stmtCsv,
+          invoices: invalidInvoiceJson,
+        }),
+      })
+    );
+
+    expect(res.status).toBe(400);
+    const body: any = await res.json();
+    expect(body.error).toBeDefined();
+
+    // Verify the server did not crash and responds to subsequent requests
+    const healthRes = await app.handle(new Request('http://localhost/health'));
+    expect(healthRes.status).toBe(200);
+    const healthBody: any = await healthRes.json();
+    expect(healthBody.status).toBe('ok');
+  });
 });

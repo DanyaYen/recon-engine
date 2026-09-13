@@ -248,6 +248,9 @@ export function reconcile(
         ? options.feeTolerancePercent
         : 0.02;
 
+  // Filter incoming invoices: only OPEN invoices are matchable
+  const matchableInvoices = invoices.filter((inv) => inv.status === 'OPEN');
+
   // Deduplicate incoming transactions by id prior to executing matches
   const seenIncomingTxIds = new Set<string>();
   const incomingTxs: NormalizedTransaction[] = [];
@@ -298,7 +301,7 @@ export function reconcile(
     }
   }
 
-  for (const inv of invoices) {
+  for (const inv of matchableInvoices) {
     registerRef(inv.invoiceNumber, inv);
     registerRef(inv.id, inv);
 
@@ -433,7 +436,7 @@ export function reconcile(
   // Amount tolerance: +/- feeTolerance
   // =========================================================================
   const remainingTxs = incomingTxs.filter((tx) => !matchedTxIds.has(tx.id));
-  const remainingInvoices = invoices.filter((inv) => !matchedInvoiceIds.has(inv.id));
+  const remainingInvoices = matchableInvoices.filter((inv) => !matchedInvoiceIds.has(inv.id));
 
   if (remainingTxs.length > 0 && remainingInvoices.length > 0) {
     // Group remaining invoices by currency sorted by amountCents for range lookups
@@ -965,10 +968,27 @@ export function reconcile(
     });
   }
 
-  // Identify unmatched invoices
-  const unmatchedInvoices = invoices.filter(
-    (inv) => !matchedInvoiceIds.has(inv.id)
-  );
+  // Identify unmatched and non-open invoices
+  const unmatchedInvoices: NormalizedInvoice[] = invoices
+    .filter((inv) => !matchedInvoiceIds.has(inv.id))
+    .map((inv) => {
+      if (inv.status !== 'OPEN') {
+        return {
+          ...inv,
+          reason: 'INVOICE_NOT_OPEN',
+          metadata: { ...inv.metadata, reason: 'INVOICE_NOT_OPEN' },
+        };
+      }
+      return inv;
+    });
+
+  const skippedInvoices: NormalizedInvoice[] = invoices
+    .filter((inv) => inv.status !== 'OPEN')
+    .map((inv) => ({
+      ...inv,
+      reason: 'INVOICE_NOT_OPEN',
+      metadata: { ...inv.metadata, reason: 'INVOICE_NOT_OPEN' },
+    }));
 
   // Compute summary metrics
   const matchedCount = matches.filter(
@@ -1047,5 +1067,6 @@ export function reconcile(
     },
     matches,
     unmatchedInvoices,
+    skippedInvoices,
   };
 }

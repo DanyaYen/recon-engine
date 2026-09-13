@@ -83,6 +83,7 @@ export const ReconciliationReportSchema = z.object({
   }),
   matches: z.array(MatchResultSchema),
   unmatchedInvoices: z.array(NormalizedInvoiceSchema),
+  skippedInvoices: z.array(NormalizedInvoiceSchema).optional(),
 });
 
 export type ReconciliationReport = z.infer<typeof ReconciliationReportSchema>;

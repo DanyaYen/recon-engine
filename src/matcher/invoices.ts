@@ -18,6 +18,17 @@ const INVOICE_SYNONYMS = {
   customerIban: ['customer iban', 'customer_iban', 'iban', 'account'],
 };
 
+export class InvalidInvoiceDataError extends Error {
+  public details?: unknown;
+
+  constructor(message: string, details?: unknown) {
+    super(message);
+    this.name = 'InvalidInvoiceDataError';
+    this.details = details;
+    Object.setPrototypeOf(this, InvalidInvoiceDataError.prototype);
+  }
+}
+
 /**
  * Loads and validates invoices from a JSON file, CSV file, or raw string content.
  */
@@ -37,15 +48,18 @@ export async function loadInvoices(pathOrContent: string): Promise<NormalizedInv
     parsedJson = JSON.parse(content);
     isJson = true;
   } catch {
-    // Это действительно не JSON, пробуем CSV ниже
+    // This is not JSON, proceed to CSV below
   }
 
   if (isJson) {
-    // Если это был JSON, валидируем строго. Никакого фоллбэка в CSV!
+    // Validate JSON strictly without falling back to CSV
     const result = z.array(NormalizedInvoiceSchema).safeParse(parsedJson);
     if (!result.success) {
       console.error(`Validation error in invoices JSON:`, result.error.format());
-      process.exit(1);
+      throw new InvalidInvoiceDataError(
+        `Validation error in invoices JSON: ${result.error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join(', ')}`,
+        result.error.format()
+      );
     }
     return result.data;
   }

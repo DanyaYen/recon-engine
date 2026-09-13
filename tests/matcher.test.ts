@@ -2,7 +2,7 @@ import { describe, it, expect } from 'bun:test';
 import { spawnSync } from 'child_process';
 import { join } from 'path';
 import { reconcile } from '../src/matcher/engine.js';
-import { loadInvoices } from '../src/matcher/invoices.js';
+import { loadInvoices, InvalidInvoiceDataError } from '../src/matcher/invoices.js';
 import { jaroSimilarity, jaroWinklerSimilarity } from '../src/utils/fuzzy.js';
 import type { NormalizedTransaction } from '../src/schemas/transaction.js';
 import type { NormalizedInvoice } from '../src/schemas/invoice.js';
@@ -46,7 +46,7 @@ describe('Invoices Loader', () => {
     expect(invoices[0].amountCents).toBe(150000);
   });
 
-  it('fails with process.exit(1) on invalid amountCents (float or string) in JSON instead of falling back to zero invoice', () => {
+  it('throws InvalidInvoiceDataError on invalid amountCents (float or string) in JSON instead of falling back to zero invoice', async () => {
     const invalidFloatJson = JSON.stringify([
       {
         id: 'inv_invalid_1',
@@ -57,6 +57,8 @@ describe('Invoices Loader', () => {
         customerName: 'Acme Corp',
       },
     ]);
+    await expect(loadInvoices(invalidFloatJson)).rejects.toThrow(InvalidInvoiceDataError);
+
     const resFloat = spawnSync(
       'bun',
       [
@@ -78,6 +80,8 @@ describe('Invoices Loader', () => {
         customerName: 'Acme Corp',
       },
     ]);
+    await expect(loadInvoices(invalidStringJson)).rejects.toThrow(InvalidInvoiceDataError);
+
     const resString = spawnSync(
       'bun',
       [
@@ -627,6 +631,38 @@ describe('Matching Engine (Deterministic & Fuzzy)', () => {
     expect(m.invoice?.remainingCents).toBe(40000);
     expect(invs[0].remainingCents).toBe(40000);
     expect(m.discrepancies[0]).toContain('Partial payment');
+  });
+
+  it('does not match a VOID invoice matching transaction amount and reference, recording reason INVOICE_NOT_OPEN', () => {
+    const voidInvoice: NormalizedInvoice = {
+      id: 'inv_void_1',
+      invoiceNumber: 'INV-2024-VOID',
+      amountCents: 10000,
+      currency: 'EUR',
+      issueDate: '2024-09-01',
+      status: 'VOID',
+      customerName: 'Acme Corp GmbH',
+    };
+
+    const tx: NormalizedTransaction = {
+      id: 'tx_void_1',
+      bookingDate: '2024-09-02',
+      amountCents: 10000,
+      currency: 'EUR',
+      direction: 'INCOMING',
+      counterpartyName: 'Acme Corp GmbH',
+      reference: 'INV-2024-VOID',
+      sourceFormat: 'test',
+    };
+
+    const report = reconcile([tx], [voidInvoice]);
+    expect(report.summary.matchedCount).toBe(0);
+    expect(report.matches.length).toBe(1);
+    expect(report.matches[0].status).toBe('UNMATCHED');
+
+    const unmatchedVoidInv = report.unmatchedInvoices.find((inv) => inv.id === 'inv_void_1');
+    expect(unmatchedVoidInv).toBeDefined();
+    expect(unmatchedVoidInv?.reason).toBe('INVOICE_NOT_OPEN');
   });
 
   it('benchmark: matches 2,000 transactions against 2,000 invoices in < 250ms', () => {

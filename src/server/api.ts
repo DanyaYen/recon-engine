@@ -1,7 +1,7 @@
 import { Elysia } from 'elysia';
 import { z } from 'zod';
 import { parseStatement } from '../parsers/index.js';
-import { loadInvoices } from '../matcher/invoices.js';
+import { loadInvoices, InvalidInvoiceDataError } from '../matcher/invoices.js';
 import { reconcile, type MatcherOptions } from '../matcher/engine.js';
 import { NormalizedInvoiceSchema, type NormalizedInvoice } from '../schemas/invoice.js';
 
@@ -148,6 +148,9 @@ export function createServerApp() {
         return report;
       } catch (err: unknown) {
         set.status = 400;
+        if (err instanceof InvalidInvoiceDataError) {
+          return { error: err.message };
+        }
         if (err instanceof z.ZodError) {
           return { error: err.errors.map((e) => e.message).join('; ') };
         }
