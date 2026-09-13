@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { parseAmountToCents, formatCents, InvalidAmountError } from '../src/utils/money.js';
+import { parseAmountToCents, formatCents, InvalidAmountError, AmbiguousAmountError } from '../src/utils/money.js';
 import { parseBankDate, InvalidDateError, getDayDifference } from '../src/utils/date.js';
 import { parseCsv } from '../src/utils/csv.js';
 import { cleanCompanyName, extractInvoiceCandidates, normalizeRemittance } from '../src/utils/text.js';
@@ -30,18 +30,36 @@ describe('Money utilities', () => {
   });
 
   it('handles boundary amounts and rounding edge cases without floating point inaccuracies', () => {
-    // Stress tests on boundary amounts specified in code review
-    expect(parseAmountToCents('1.005')).toEqual({ amountCents: 101, direction: 'INCOMING' });
     expect(parseAmountToCents('29.99')).toEqual({ amountCents: 2999, direction: 'INCOMING' });
     expect(parseAmountToCents('0.07')).toEqual({ amountCents: 7, direction: 'INCOMING' });
-    expect(parseAmountToCents('1234.567')).toEqual({ amountCents: 123457, direction: 'INCOMING' });
-
-    // Additional boundary and rounding edge cases
-    expect(parseAmountToCents('0.004')).toEqual({ amountCents: 0, direction: 'INCOMING' });
-    expect(parseAmountToCents('0.005')).toEqual({ amountCents: 1, direction: 'INCOMING' });
-    expect(parseAmountToCents('0.999')).toEqual({ amountCents: 100, direction: 'INCOMING' });
-    expect(parseAmountToCents('-1.005')).toEqual({ amountCents: 101, direction: 'OUTGOING' });
+    expect(parseAmountToCents('1234.5678')).toEqual({ amountCents: 123457, direction: 'INCOMING' });
     expect(parseAmountToCents('$ 1,234.567')).toEqual({ amountCents: 123457, direction: 'INCOMING' });
+    expect(parseAmountToCents('$ -1,234.567')).toEqual({ amountCents: 123457, direction: 'OUTGOING' });
+  });
+
+  it('throws AmbiguousAmountError for single dot followed by exactly 3 digits unless thousandsSeparator is passed', () => {
+    expect(() => parseAmountToCents('50.000')).toThrow(AmbiguousAmountError);
+    expect(() => parseAmountToCents('1.000')).toThrow(AmbiguousAmountError);
+    expect(() => parseAmountToCents('1.005')).toThrow(AmbiguousAmountError);
+    expect(() => parseAmountToCents('-1.005')).toThrow(AmbiguousAmountError);
+    expect(() => parseAmountToCents('0.005')).toThrow(AmbiguousAmountError);
+
+    expect(parseAmountToCents('50.000', { thousandsSeparator: '.' })).toEqual({
+      amountCents: 5000000,
+      direction: 'INCOMING',
+    });
+    expect(parseAmountToCents('-50.000', { thousandsSeparator: '.' })).toEqual({
+      amountCents: 5000000,
+      direction: 'OUTGOING',
+    });
+    expect(parseAmountToCents('1.000', { thousandsSeparator: '.' })).toEqual({
+      amountCents: 100000,
+      direction: 'INCOMING',
+    });
+    expect(parseAmountToCents('1.500', 'INCOMING', { thousandsSeparator: '.' })).toEqual({
+      amountCents: 150000,
+      direction: 'INCOMING',
+    });
   });
 
   it('prevents floating-point precision loss and parses edge cases to integer cents', () => {
@@ -110,9 +128,21 @@ describe('Date utilities', () => {
     expect(parseBankDate('15.12.2023')).toBe('2023-12-15');
   });
 
-  it('parses slash dates DD/MM/YYYY and YYYY/MM/DD', () => {
+  it('parses slash dates DD/MM/YYYY and YYYY/MM/DD and handles US vs European format', () => {
     expect(parseBankDate('01/09/2024')).toBe('2024-09-01');
     expect(parseBankDate('2024/09/01')).toBe('2024-09-01');
+
+    // US dates where part 2 > 12: MM/DD/YYYY
+    expect(parseBankDate('12/25/2026')).toBe('2026-12-25');
+    expect(parseBankDate('07/19/2025')).toBe('2025-07-19');
+
+    // European dates where part 1 > 12: DD/MM/YYYY
+    expect(parseBankDate('25/12/2026')).toBe('2026-12-25');
+    expect(parseBankDate('19/07/2025')).toBe('2025-07-19');
+
+    // Ambiguous dates where both part 1 and part 2 <= 12: default to DD/MM/YYYY unless dateLocale is MM/DD/YYYY
+    expect(parseBankDate('05/06/2026')).toBe('2026-06-05'); // 5th of June (DD/MM/YYYY default)
+    expect(parseBankDate('05/06/2026', { dateLocale: 'MM/DD/YYYY' })).toBe('2026-05-06'); // May 6th (US MM/DD/YYYY)
   });
 
   it('parses SWIFT MT940 YYMMDD', () => {

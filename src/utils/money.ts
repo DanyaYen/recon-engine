@@ -14,6 +14,22 @@ export class InvalidAmountError extends Error {
   }
 }
 
+export class AmbiguousAmountError extends Error {
+  public readonly rawAmount: unknown;
+
+  constructor(rawAmount: unknown, message?: string) {
+    super(message ?? `Ambiguous amount format: ${JSON.stringify(rawAmount)}`);
+    this.name = 'AmbiguousAmountError';
+    this.rawAmount = rawAmount;
+    Object.setPrototypeOf(this, AmbiguousAmountError.prototype);
+  }
+}
+
+export interface ParseAmountOptions {
+  forcedDirection?: 'INCOMING' | 'OUTGOING';
+  thousandsSeparator?: string;
+}
+
 export interface ParsedAmount {
   amountCents: number;
   direction: 'INCOMING' | 'OUTGOING';
@@ -29,8 +45,20 @@ export interface ParsedAmount {
  */
 export function parseAmountToCents(
   rawAmount: string | number,
-  forcedDirection?: 'INCOMING' | 'OUTGOING'
+  forcedDirectionOrOptions?: 'INCOMING' | 'OUTGOING' | ParseAmountOptions,
+  options?: ParseAmountOptions
 ): ParsedAmount {
+  let forcedDirection: 'INCOMING' | 'OUTGOING' | undefined;
+  let opts: ParseAmountOptions | undefined;
+
+  if (typeof forcedDirectionOrOptions === 'string') {
+    forcedDirection = forcedDirectionOrOptions;
+    opts = options;
+  } else if (forcedDirectionOrOptions && typeof forcedDirectionOrOptions === 'object') {
+    opts = forcedDirectionOrOptions;
+    forcedDirection = opts.forcedDirection;
+  }
+
   if (rawAmount === null || rawAmount === undefined) {
     throw new InvalidAmountError(rawAmount, 'Amount is missing (null or undefined)');
   }
@@ -111,8 +139,19 @@ export function parseAmountToCents(
       // Multiple dots: "1.000.000" -> thousands separator
       whole = cleaned.replace(/\./g, '');
       fraction = '';
+    } else if (dotParts.length === 2 && dotParts[1].length === 3) {
+      // Single dot separator followed by exactly 3 digits and no other separators exist (e.g. "50.000")
+      if (opts?.thousandsSeparator === '.') {
+        whole = cleaned.replace(/\./g, '');
+        fraction = '';
+      } else {
+        throw new AmbiguousAmountError(
+          rawAmount,
+          `Ambiguous amount with single dot and 3 digits: "${rawAmount}". Pass thousandsSeparator: '.' if dot represents thousands.`
+        );
+      }
     } else {
-      // Single dot: standard decimal "1250.50" or "1.005"
+      // Single dot: standard decimal "1250.50"
       whole = dotParts[0];
       fraction = dotParts[1] || '';
     }

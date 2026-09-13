@@ -65,7 +65,14 @@ export function validateDateComponents(
   return `${year}-${mm}-${dd}`;
 }
 
-export function parseBankDate(rawDate: string | Date | undefined): string {
+export interface ParseDateOptions {
+  dateLocale?: 'DD/MM/YYYY' | 'MM/DD/YYYY' | string;
+}
+
+export function parseBankDate(
+  rawDate: string | Date | undefined,
+  options?: ParseDateOptions
+): string {
   if (rawDate === undefined || rawDate === null || rawDate === '') {
     throw new InvalidDateError(rawDate, 'Date is missing (null, undefined, or empty)');
   }
@@ -112,7 +119,7 @@ export function parseBankDate(rawDate: string | Date | undefined): string {
     return validateDateComponents(year, month, day, rawDate);
   }
 
-  // 4. Slash format: DD/MM/YYYY vs YYYY/MM/DD
+  // 4. Slash format: DD/MM/YYYY vs MM/DD/YYYY vs YYYY/MM/DD
   const slashMatch = str.match(/^(\d{1,4})\/(\d{1,2})\/(\d{1,4})/);
   if (slashMatch) {
     const p1 = slashMatch[1];
@@ -126,10 +133,31 @@ export function parseBankDate(rawDate: string | Date | undefined): string {
       const day = parseInt(p3, 10);
       return validateDateComponents(year, month, day, rawDate);
     }
-    // DD/MM/YYYY
-    const day = parseInt(p1, 10);
-    const month = parseInt(p2, 10);
+
+    const n1 = parseInt(p1, 10);
+    const n2 = parseInt(p2, 10);
     const year = parseInt(p3.length === 2 ? `20${p3}` : p3, 10);
+
+    let day: number;
+    let month: number;
+
+    if (n1 > 12 && n2 <= 12) {
+      // Must be DD/MM/YYYY (n1 is day > 12, n2 is month <= 12)
+      day = n1;
+      month = n2;
+    } else if (n2 > 12 && n1 <= 12) {
+      // Must be MM/DD/YYYY (n2 is day > 12, n1 is month <= 12) e.g. 12/25/2026
+      month = n1;
+      day = n2;
+    } else if (options?.dateLocale === 'MM/DD/YYYY') {
+      month = n1;
+      day = n2;
+    } else {
+      // Default to DD/MM/YYYY
+      day = n1;
+      month = n2;
+    }
+
     return validateDateComponents(year, month, day, rawDate);
   }
 

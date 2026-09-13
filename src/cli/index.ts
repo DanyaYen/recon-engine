@@ -254,8 +254,6 @@ program
           }
         }
         report.summary.totalsByCurrency = totals;
-        const defaultCurr = report.summary.currency || Object.keys(totals)[0] || 'EUR';
-        report.summary.totalMatchedCents = totals[defaultCurr]?.matchedCents || 0;
       };
 
       if (options.yes) {

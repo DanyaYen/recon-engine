@@ -6,6 +6,7 @@ import { loadInvoices, InvalidInvoiceDataError } from '../src/matcher/invoices.j
 import { jaroSimilarity, jaroWinklerSimilarity } from '../src/utils/fuzzy.js';
 import type { NormalizedTransaction } from '../src/schemas/transaction.js';
 import type { NormalizedInvoice } from '../src/schemas/invoice.js';
+import { ReconciliationReportSchema } from '../src/schemas/reconciliation.js';
 
 const FIXTURES_DIR = join(import.meta.dir, 'fixtures');
 const CLI_PATH = join(import.meta.dir, '../src/cli/index.js');
@@ -579,7 +580,9 @@ describe('Matching Engine (Deterministic & Fuzzy)', () => {
     ];
 
     const report = reconcile(txs, invs, { feeTolerancePercentage: 0.03 });
+    expect(ReconciliationReportSchema.safeParse(report).success).toBe(true);
     expect(report.summary.totalsByCurrency).toBeDefined();
+    expect((report.summary as any).totalMatchedCents).toBeUndefined();
 
     const eurTotals = report.summary.totalsByCurrency['EUR'];
     expect(eurTotals).toBeDefined();

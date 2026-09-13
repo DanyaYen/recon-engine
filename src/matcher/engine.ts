@@ -1046,10 +1046,6 @@ export function reconcile(
     }
   }
 
-  const defaultCurrency =
-    transactions[0]?.currency || invoices[0]?.currency || 'EUR';
-  const totalMatchedCents = totalsByCurrency[defaultCurrency]?.matchedCents || 0;
-
   return {
     id: randomUUID(),
     createdAt: new Date().toISOString(),
@@ -1061,8 +1057,6 @@ export function reconcile(
       matchedCount,
       reviewNeededCount,
       unmatchedCount,
-      totalMatchedCents,
-      currency: defaultCurrency,
       totalsByCurrency,
     },
     matches,

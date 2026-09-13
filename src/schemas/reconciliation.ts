@@ -68,10 +68,6 @@ export const ReconciliationReportSchema = z.object({
     matchedCount: z.number().int().nonnegative(),
     reviewNeededCount: z.number().int().nonnegative(),
     unmatchedCount: z.number().int().nonnegative(),
-    /** @deprecated Use totalsByCurrency instead */
-    totalMatchedCents: z.number().optional(),
-    /** @deprecated Use totalsByCurrency instead */
-    currency: z.string().optional(),
     totalsByCurrency: z.record(
       z.string(),
       z.object({
