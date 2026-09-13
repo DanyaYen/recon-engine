@@ -166,15 +166,6 @@ Measured on Bun v1.3+ with synthetic production batches:
 
 ---
 
-## 🗺️ Upcoming Roadmap
-
-- [ ] **DATEV & Accounting Export**: Automatic conversion of matched pairs into standard German DATEV CSV.
-- [ ] **ECB Multi-Currency Tolerance**: On-the-fly EUR/USD conversion via ECB daily reference rates for FX reconciliation.
-- [ ] **1:N & N:1 Settlement Graphs**: Multi-invoice aggregation and payment split reconciliation.
-- [ ] **Append-Only Double-Entry Ledger**: Native immutable ledger plugin for BaaS platforms and escrow compliance.
-
----
-
 ## 🎯 Design Scope & Intentional Boundaries
 
 `recon-engine` is purpose-built as a **fast, lightweight B2B statement reconciliation tool** to replace fragile ad-hoc scripts. It is not an enterprise clearinghouse like Modern Treasury or Visa DPS.
