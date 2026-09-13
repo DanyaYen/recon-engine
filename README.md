@@ -17,39 +17,45 @@
 
 ---
 
+```mermaid
+flowchart TD
+    subgraph INGEST ["1. Raw Ingestion Layer"]
+        A1["Bank Statements\n(CAMT.053 XML / SWIFT MT940 / CSV)"]
+        A2["Invoices & Billing Feeds\n(Stripe / Odoo / ERP JSON & CSV)"]
+    end
+
+    subgraph PARSER ["2. Universal Statement Parser"]
+        B1["Format Auto-Detection\n(Namespace-Agnostic fast-xml-parser)"]
+        B2["Ingress Row Quarantine\n(rejectedRows Isolation)"]
+        B3["Canonical Fingerprinting\n(SHA-256 Idempotency Tuple)"]
+    end
+
+    subgraph ENGINE ["3. Deterministic Matching Engine"]
+        C1["Two-Phase Bucket Indexing\n(O(1) Exact Reference & Currency/Amount Buckets)"]
+        C2["Fee Tolerance & Scoped Fuzzy Matching\n(Jaro-Winkler / Levenshtein)"]
+        C3["Lifecycle & Residual Tracking\n(OPEN status filter, PARTIAL_MATCH)"]
+    end
+
+    subgraph AUDIT ["4. Invariant & Ledger Output"]
+        D1["Totals by Currency Report\n(Terminal Table / JSON Audit Log)"]
+        D2["Double-Entry Balanced Postings\n(Debit/Credit Suspense Account 201999)"]
+    end
+
+    A1 --> B1
+    A2 --> C1
+    B1 --> B2 --> B3 --> C1
+    C1 --> C2 --> C3
+    C3 --> D1
+    C3 --> D2
+```
+
+---
+
 ## 💡 Why `recon-engine`?
 
 Every B2B platform is stuck writing brittle, one-off glue scripts to parse bank statements (**CSV**, **CAMT.053 XML**, **SWIFT MT940**) and match them against invoices.
 
 Heavy enterprise platforms cost $2,000+/mo and require months of sales calls. `recon-engine` gives you an instant, developer-first alternative that runs locally in milliseconds, runs in CI/CD, or embeds via CLI, TypeScript, and HTTP.
-
-```
-┌────────────────────────┐        ┌────────────────────────┐
-│    Bank Statements     │        │  Invoices & Receivables │
-│ CSV / MT940 / CAMT.053 │        │ Stripe / DB / JSON / CSV│
-└───────────┬────────────┘        └───────────┬────────────┘
-            │                                 │
-            ▼                                 ▼
-┌──────────────────────────────────────────────────────────┐
-│        Universal Statement Parser (Bun / TS)             │
-│        Auto-sniffs format -> NormalizedTransaction[]     │
-│        Quarantines invalid lines into rejectedRows[]     │
-└───────────────────────────┬──────────────────────────────┘
-                            │
-                            ▼
-┌──────────────────────────────────────────────────────────┐
-│         3-Stage Bucketed Matching Engine O(N + M)        │
-│  Stage 1: O(1) Exact Ref Map + Partial Payment Tracking   │
-│  Stage 2: O(1) Currency/Amount Buckets (±Date window)     │
-│  Stage 3: Token-Pruned Jaro-Winkler + Wire Fee Range     │
-└───────────────────────────┬──────────────────────────────┘
-                            │
-                            ▼
-┌──────────────────────────────────────────────────────────┐
-│   Output: Audit Trail JSON / HTTP API / Terminal Table   │
-│   Multi-currency totalsByCurrency & skippedInvoices      │
-└──────────────────────────────────────────────────────────┘
-```
 
 ---
 

@@ -1,0 +1,15 @@
+services:
+  recon-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: recon-api
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

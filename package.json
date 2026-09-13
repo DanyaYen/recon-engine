@@ -9,9 +9,15 @@
   "type": "module",
   "main": "./src/index.ts",
   "bin": {
-    "recon-engine": "./dist/cli/index.js",
-    "recon": "./dist/cli/index.js"
+    "recon": "./src/cli/index.ts",
+    "recon-engine": "./src/cli/index.ts"
   },
+  "files": [
+    "src",
+    "package.json",
+    "README.md",
+    "LICENSE"
+  ],
   "exports": {
     ".": "./src/index.ts",
     "./parsers": "./src/parsers/index.ts",
