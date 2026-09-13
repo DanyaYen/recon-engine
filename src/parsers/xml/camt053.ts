@@ -4,6 +4,15 @@ import type { NormalizedTransaction, TransactionDirection } from '../../schemas/
 import { parseAmountToCents } from '../../utils/money.js';
 import { parseBankDate } from '../../utils/date.js';
 
+function parseBoolean(val: any): boolean {
+  if (val === true || val === 1) return true;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    return s === 'true' || s === '1';
+  }
+  return false;
+}
+
 function extractAmountNode(node: any): { rawAmount?: string; currency?: string } | null {
   if (!node) return null;
 
@@ -16,7 +25,10 @@ function extractAmountNode(node: any): { rawAmount?: string; currency?: string }
   if (!amtNode) return null;
 
   const rawAmount = typeof amtNode === 'object' ? amtNode['#text'] : amtNode;
-  const currency = typeof amtNode === 'object' ? amtNode['@_Ccy'] : undefined;
+  const currency =
+    typeof amtNode === 'object'
+      ? amtNode['@_Ccy'] || amtNode['@_ccy'] || amtNode['@_Currency']
+      : undefined;
 
   if (rawAmount !== undefined && rawAmount !== null && String(rawAmount).trim() !== '') {
     return {
@@ -28,7 +40,7 @@ function extractAmountNode(node: any): { rawAmount?: string; currency?: string }
 }
 
 function extractReferenceFromTx(tx: any, ntry?: any): string | undefined {
-  const rmtInf = tx?.RmtInf;
+  const rmtInf = tx?.RmtInf || ntry?.RmtInf;
   let ref: string | undefined = undefined;
 
   if (rmtInf?.Ustrd) {
@@ -44,8 +56,8 @@ function extractReferenceFromTx(tx: any, ntry?: any): string | undefined {
   return ref?.trim() || undefined;
 }
 
-function extractCounterparty(tx: any, direction: TransactionDirection): { name?: string; iban?: string } {
-  const rltdPties = tx?.RltdPties;
+function extractCounterparty(tx: any, direction: TransactionDirection, ntry?: any): { name?: string; iban?: string } {
+  const rltdPties = tx?.RltdPties || ntry?.RltdPties;
   if (!rltdPties) return {};
 
   const isIncoming = direction === 'INCOMING';
@@ -58,8 +70,8 @@ function extractCounterparty(tx: any, direction: TransactionDirection): { name?:
   const partyAcct = primaryAcct?.Id?.IBAN ? primaryAcct : fallbackAcct;
 
   return {
-    name: party?.Nm || undefined,
-    iban: partyAcct?.Id?.IBAN || undefined,
+    name: party?.Nm ? String(party.Nm) : undefined,
+    iban: partyAcct?.Id?.IBAN ? String(partyAcct.Id.IBAN) : undefined,
   };
 }
 
@@ -69,10 +81,10 @@ export class Camt053Parser implements StatementParser {
   readonly description = 'Standard European Open Banking XML bank statement format (camt.053.001.02/04/08)';
 
   supports(content: string): boolean {
-    const head = content.slice(0, 1500).toLowerCase();
+    const head = content.slice(0, 2000).toLowerCase();
     return (
       (head.includes('camt.053') || head.includes('bktocstmrstmt')) &&
-      /<([a-z0-9_-]+:)?document\b/i.test(head)
+      /<([a-z0-9_-]+:)?(document|bktocstmrstmt)\b/i.test(head)
     );
   }
 
@@ -87,7 +99,7 @@ export class Camt053Parser implements StatementParser {
 
     const parsed = parser.parse(content);
     const documentNode = parsed?.Document || parsed;
-    const bkStmt = documentNode?.BkToCstmrStmt;
+    const bkStmt = documentNode?.BkToCstmrStmt || parsed?.BkToCstmrStmt;
 
     if (!bkStmt) {
       throw new Error('Invalid CAMT.053 format: missing BkToCstmrStmt node');
@@ -125,23 +137,31 @@ export class Camt053Parser implements StatementParser {
         const baseNtryDirection: TransactionDirection = ntryCdtDbtInd.includes('CRDT') ? 'INCOMING' : 'OUTGOING';
 
         // Reversal Indicator: <RvslInd>true</RvslInd>
-        const ntryIsReversal =
-          String(ntry?.RvslInd).toLowerCase() === 'true' || String(ntry?.RvslInd) === '1';
+        const ntryIsReversal = parseBoolean(ntry?.RvslInd);
 
         // Transaction Details (<NtryDtls> -> <TxDtls>)
-        const ntryDtls = ntry?.NtryDtls;
-        const rawTxDtls = ntryDtls?.TxDtls;
-        const txDtlsList: any[] = rawTxDtls
-          ? Array.isArray(rawTxDtls)
-            ? rawTxDtls
-            : [rawTxDtls]
+        const ntryDtlsList = Array.isArray(ntry?.NtryDtls)
+          ? ntry.NtryDtls
+          : ntry?.NtryDtls
+          ? [ntry.NtryDtls]
           : [];
 
-        // Check whether multiple TxDtls exist and whether any has its own Amt
-        const hasIndividualAmounts =
-          txDtlsList.length > 0 && txDtlsList.some((tx) => extractAmountNode(tx) !== null);
+        const txDtlsList: any[] = [];
+        for (const dtls of ntryDtlsList) {
+          if (dtls?.TxDtls) {
+            if (Array.isArray(dtls.TxDtls)) {
+              txDtlsList.push(...dtls.TxDtls);
+            } else {
+              txDtlsList.push(dtls.TxDtls);
+            }
+          }
+        }
 
-        if (txDtlsList.length > 1 && !hasIndividualAmounts) {
+        // Check whether multiple TxDtls exist and whether all contain individual amounts
+        const allHaveIndividualAmounts =
+          txDtlsList.length > 0 && txDtlsList.every((tx) => extractAmountNode(tx) !== null);
+
+        if (txDtlsList.length > 1 && !allHaveIndividualAmounts) {
           // Multiple TxDtls without individual amounts:
           // Treat Ntry as a single transaction to prevent duplicating the parent Ntry amount across all of them
           const direction: TransactionDirection = ntryIsReversal
@@ -172,7 +192,7 @@ export class Camt053Parser implements StatementParser {
           let counterpartyName: string | undefined;
           let counterpartyIban: string | undefined;
           for (const tx of txDtlsList) {
-            const cp = extractCounterparty(tx, direction);
+            const cp = extractCounterparty(tx, direction, ntry);
             if (cp.name && !counterpartyName) counterpartyName = cp.name;
             if (cp.iban && !counterpartyIban) counterpartyIban = cp.iban;
           }
@@ -199,6 +219,7 @@ export class Camt053Parser implements StatementParser {
             reference,
             bankTransactionId,
             sourceFormat: this.id,
+            isReversal: ntryIsReversal ? true : undefined,
             raw: ntry,
           });
         } else if (txDtlsList.length > 0) {
@@ -209,10 +230,7 @@ export class Camt053Parser implements StatementParser {
             // Direction & Reversal check
             const txCdtDbtInd = tx?.CdtDbtInd ? String(tx.CdtDbtInd).toUpperCase() : ntryCdtDbtInd;
             const baseDir: TransactionDirection = txCdtDbtInd.includes('CRDT') ? 'INCOMING' : 'OUTGOING';
-            const isReversal =
-              ntryIsReversal ||
-              String(tx?.RvslInd).toLowerCase() === 'true' ||
-              String(tx?.RvslInd) === '1';
+            const isReversal = ntryIsReversal || parseBoolean(tx?.RvslInd);
             const direction: TransactionDirection = isReversal
               ? baseDir === 'INCOMING'
                 ? 'OUTGOING'
@@ -232,7 +250,7 @@ export class Camt053Parser implements StatementParser {
             const valueDate = txRawValDate ? parseBankDate(txRawValDate) : undefined;
 
             // Counterparty
-            const { name: counterpartyName, iban: counterpartyIban } = extractCounterparty(tx, direction);
+            const { name: counterpartyName, iban: counterpartyIban } = extractCounterparty(tx, direction, ntry);
 
             // Reference
             const reference = extractReferenceFromTx(tx, ntry);
@@ -259,6 +277,7 @@ export class Camt053Parser implements StatementParser {
               reference,
               bankTransactionId,
               sourceFormat: this.id,
+              isReversal: isReversal ? true : undefined,
               raw: tx,
             });
           }
@@ -276,6 +295,8 @@ export class Camt053Parser implements StatementParser {
             bankTransactionId ||
             `camt053-${ntryBookingDate}-${amountCents}-${stmtIdx + 1}-${ntryIdx + 1}-1`;
 
+          const { name: counterpartyName, iban: counterpartyIban } = extractCounterparty(undefined, direction, ntry);
+
           transactions.push({
             id,
             bookingDate: ntryBookingDate,
@@ -283,11 +304,12 @@ export class Camt053Parser implements StatementParser {
             amountCents,
             currency: parentCurrency,
             direction,
-            counterpartyName: undefined,
-            counterpartyIban: undefined,
+            counterpartyName,
+            counterpartyIban,
             reference: ntry?.AddtlNtryInf ? String(ntry.AddtlNtryInf).trim() : undefined,
             bankTransactionId,
             sourceFormat: this.id,
+            isReversal: ntryIsReversal ? true : undefined,
             raw: ntry,
           });
         }

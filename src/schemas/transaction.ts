@@ -16,6 +16,7 @@ export const NormalizedTransactionSchema = z.object({
   reference: z.string().optional().describe('Remittance information, description, or payment reference text'),
   bankTransactionId: z.string().optional().describe('Original bank/SWIFT transaction ID or EndToEndId'),
   sourceFormat: z.string().describe('Identifier of the parser used (e.g. revolut-csv, camt053, mt940)'),
+  isReversal: z.boolean().optional().describe('Whether this transaction is a reversal (e.g. RvslInd true)'),
   raw: z.record(z.unknown()).optional().describe('Original parsed row or raw data for auditing'),
 });
 

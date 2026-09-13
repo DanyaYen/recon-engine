@@ -149,6 +149,28 @@ describe('Universal Statement Parser - Auto Detection and Parsing', () => {
       expect(result.transactions[0].reference).toContain('Sub-item 1');
       expect(result.transactions[0].reference).toContain('Sub-item 2');
     });
+
+    it('handles namespaced XML (<ns2:Document>) and asserts correct inverted debit/credit for both CRDT and DBIT with RvslInd=true', async () => {
+      const content = readFileSync(join(camtDir, 'camt053-reversals-debit-credit.xml'), 'utf-8');
+      const result = await parseStatement(content);
+      expect(result.transactions.length).toBe(2);
+
+      const [crdtReversal, dbitReversal] = result.transactions;
+
+      // CRDT (normally INCOMING) reversed -> must become OUTGOING (debit)
+      expect(crdtReversal.amountCents).toBe(35000);
+      expect(crdtReversal.direction).toBe('OUTGOING');
+      expect(crdtReversal.isReversal).toBe(true);
+      expect(crdtReversal.counterpartyName).toBe('Reversed Credit Payer');
+      expect(crdtReversal.reference).toBe('Reversed Incoming Transfer');
+
+      // DBIT (normally OUTGOING) reversed -> must become INCOMING (credit)
+      expect(dbitReversal.amountCents).toBe(12000);
+      expect(dbitReversal.direction).toBe('INCOMING');
+      expect(dbitReversal.isReversal).toBe(true);
+      expect(dbitReversal.counterpartyName).toBe('Reversed Debit Beneficiary');
+      expect(dbitReversal.reference).toBe('Reversed Outgoing Wire Fee');
+    });
   });
 
   // 4. SWIFT MT940 fixtures

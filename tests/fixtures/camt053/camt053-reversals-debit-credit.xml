@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ns2:Document xmlns:ns2="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <ns2:BkToCstmrStmt>
+    <ns2:GrpHdr>
+      <ns2:MsgId>MSG-REVERSALS-001</ns2:MsgId>
+      <ns2:CreDtTm>2024-09-01T12:00:00Z</ns2:CreDtTm>
+    </ns2:GrpHdr>
+    <ns2:Stmt>
+      <ns2:Id>STMT-REVERSALS-001</ns2:Id>
+      <ns2:Ntry>
+        <ns2:Amt Ccy="EUR">350.00</ns2:Amt>
+        <ns2:CdtDbtInd>CRDT</ns2:CdtDbtInd>
+        <ns2:RvslInd>true</ns2:RvslInd>
+        <ns2:BookgDt>
+          <ns2:Dt>2024-09-01</ns2:Dt>
+        </ns2:BookgDt>
+        <ns2:NtryDtls>
+          <ns2:TxDtls>
+            <ns2:RltdPties>
+              <ns2:Dbtr>
+                <ns2:Nm>Reversed Credit Payer</ns2:Nm>
+              </ns2:Dbtr>
+            </ns2:RltdPties>
+            <ns2:RmtInf>
+              <ns2:Ustrd>Reversed Incoming Transfer</ns2:Ustrd>
+            </ns2:RmtInf>
+          </ns2:TxDtls>
+        </ns2:NtryDtls>
+      </ns2:Ntry>
+      <ns2:Ntry>
+        <ns2:Amt Ccy="EUR">120.00</ns2:Amt>
+        <ns2:CdtDbtInd>DBIT</ns2:CdtDbtInd>
+        <ns2:RvslInd>true</ns2:RvslInd>
+        <ns2:BookgDt>
+          <ns2:Dt>2024-09-02</ns2:Dt>
+        </ns2:BookgDt>
+        <ns2:NtryDtls>
+          <ns2:TxDtls>
+            <ns2:RltdPties>
+              <ns2:Cdtr>
+                <ns2:Nm>Reversed Debit Beneficiary</ns2:Nm>
+              </ns2:Cdtr>
+            </ns2:RltdPties>
+            <ns2:RmtInf>
+              <ns2:Ustrd>Reversed Outgoing Wire Fee</ns2:Ustrd>
+            </ns2:RmtInf>
+          </ns2:TxDtls>
+        </ns2:NtryDtls>
+      </ns2:Ntry>
+    </ns2:Stmt>
+  </ns2:BkToCstmrStmt>
+</ns2:Document>
