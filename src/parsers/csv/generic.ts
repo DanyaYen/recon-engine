@@ -3,6 +3,7 @@ import type { NormalizedTransaction } from '../../schemas/transaction.js';
 import { parseCsv } from '../../utils/csv.js';
 import { parseAmountToCents } from '../../utils/money.js';
 import { parseBankDate } from '../../utils/date.js';
+import { generateTransactionFingerprint } from '../../utils/fingerprint.js';
 
 const SYNONYMS = {
   date: ['date', 'booking date', 'buchungstag', 'datum', 'transaction date', 'tx date', 'value date'],
@@ -10,6 +11,8 @@ const SYNONYMS = {
   reference: ['reference', 'verwendungszweck', 'description', 'memo', 'details', 'narrative', 'payment reference', 'remittance'],
   counterparty: ['counterparty', 'payer', 'payee', 'partner', 'empfaenger', 'absender', 'auftraggeber', 'name', 'customer'],
   currency: ['currency', 'waehrung', 'ccy'],
+  iban: ['iban', 'account', 'konto', 'account number', 'kontonummer', 'kontoverbindung'],
+  id: ['id', 'txid', 'transaction id', 'transaktions-id', 'payment id', 'bank id', 'ref id'],
 };
 
 export class GenericCsvParser implements StatementParser {
@@ -47,6 +50,8 @@ export class GenericCsvParser implements StatementParser {
     const refCol = resolveCol('reference');
     const counterpartyCol = resolveCol('counterparty');
     const currencyCol = resolveCol('currency');
+    const ibanCol = resolveCol('iban');
+    const idCol = resolveCol('id');
 
     const defaultCurrency = options?.defaultCurrency || 'EUR';
     const transactions: NormalizedTransaction[] = [];
@@ -63,8 +68,20 @@ export class GenericCsvParser implements StatementParser {
       const currency = (currencyCol && row[currencyCol] ? row[currencyCol] : defaultCurrency).toUpperCase();
       const reference = refCol ? row[refCol]?.trim() : undefined;
       const counterpartyName = counterpartyCol ? row[counterpartyCol]?.trim() : undefined;
+      const bankTransactionId = idCol ? row[idCol]?.trim() : undefined;
+      const accountIban = ibanCol ? row[ibanCol]?.trim() : undefined;
 
-      const id = `csv-${bookingDate}-${amountCents}-${i + 1}`;
+      const id =
+        bankTransactionId ||
+        generateTransactionFingerprint({
+          accountIban,
+          bookingDate,
+          amountCents,
+          currency,
+          bankRef: reference,
+          endToEndId: undefined,
+          direction,
+        });
 
       transactions.push({
         id,
@@ -74,6 +91,7 @@ export class GenericCsvParser implements StatementParser {
         direction,
         counterpartyName: counterpartyName || undefined,
         reference: reference || undefined,
+        bankTransactionId: bankTransactionId || undefined,
         sourceFormat: this.id,
         raw: row,
       });

@@ -248,8 +248,17 @@ export function reconcile(
         ? options.feeTolerancePercent
         : 0.02;
 
-  // Separate incoming and outgoing transactions
-  const incomingTxs = transactions.filter((tx) => tx.direction === 'INCOMING');
+  // Deduplicate incoming transactions by id prior to executing matches
+  const seenIncomingTxIds = new Set<string>();
+  const incomingTxs: NormalizedTransaction[] = [];
+  for (const tx of transactions) {
+    if (tx.direction === 'INCOMING') {
+      if (!seenIncomingTxIds.has(tx.id)) {
+        seenIncomingTxIds.add(tx.id);
+        incomingTxs.push(tx);
+      }
+    }
+  }
   const outgoingTxs = transactions.filter((tx) => tx.direction === 'OUTGOING');
 
   const matchedInvoiceIds = new Set<string>();
@@ -1039,7 +1048,7 @@ export function reconcile(
     statementFile: options?.statementFile || 'unknown-statement',
     sourceFormat: options?.sourceFormat || 'auto',
     summary: {
-      totalTransactions: transactions.length,
+      totalTransactions: incomingTxs.length + outgoingTxs.length,
       totalInvoices: invoices.length,
       matchedCount,
       reviewNeededCount,

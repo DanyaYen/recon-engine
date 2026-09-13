@@ -3,6 +3,7 @@ import type { StatementParser, ParseOptions } from '../base.js';
 import type { NormalizedTransaction, TransactionDirection } from '../../schemas/transaction.js';
 import { parseAmountToCents } from '../../utils/money.js';
 import { parseBankDate } from '../../utils/date.js';
+import { generateTransactionFingerprint } from '../../utils/fingerprint.js';
 
 function parseBoolean(val: any): boolean {
   if (val === true || val === 1) return true;
@@ -110,6 +111,7 @@ export class Camt053Parser implements StatementParser {
 
     for (let stmtIdx = 0; stmtIdx < stmts.length; stmtIdx++) {
       const stmt = stmts[stmtIdx];
+      const accountIban = stmt?.Acct?.Id?.IBAN ? String(stmt.Acct.Id.IBAN) : undefined;
       const entries = Array.isArray(stmt.Ntry) ? stmt.Ntry : stmt.Ntry ? [stmt.Ntry] : [];
 
       for (let ntryIdx = 0; ntryIdx < entries.length; ntryIdx++) {
@@ -198,14 +200,28 @@ export class Camt053Parser implements StatementParser {
           }
 
           const firstTx = txDtlsList[0];
-          const bankTransactionId =
+          const rawEndToEndId =
             firstTx?.Refs?.EndToEndId !== 'NOTPROVIDED' && firstTx?.Refs?.EndToEndId
               ? String(firstTx.Refs.EndToEndId)
-              : firstTx?.Refs?.InstrId || ntry?.AcctSvcrRef || undefined;
+              : undefined;
+          const rawBankRef =
+            ntry?.AcctSvcrRef !== 'NOTPROVIDED' && ntry?.AcctSvcrRef
+              ? String(ntry.AcctSvcrRef)
+              : undefined;
+          const bankTransactionId =
+            rawEndToEndId || firstTx?.Refs?.InstrId || rawBankRef || undefined;
 
           const id =
             bankTransactionId ||
-            `camt053-${ntryBookingDate}-${amountCents}-${stmtIdx + 1}-${ntryIdx + 1}-1`;
+            generateTransactionFingerprint({
+              accountIban,
+              bookingDate: ntryBookingDate,
+              amountCents,
+              currency: parentCurrency,
+              bankRef: rawBankRef || reference,
+              endToEndId: rawEndToEndId,
+              direction,
+            });
 
           transactions.push({
             id,
@@ -256,14 +272,28 @@ export class Camt053Parser implements StatementParser {
             const reference = extractReferenceFromTx(tx, ntry);
 
             // Bank / SWIFT Reference ID
-            const bankTransactionId =
+            const rawEndToEndId =
               tx?.Refs?.EndToEndId !== 'NOTPROVIDED' && tx?.Refs?.EndToEndId
                 ? String(tx.Refs.EndToEndId)
-                : tx?.Refs?.InstrId || ntry?.AcctSvcrRef || undefined;
+                : undefined;
+            const rawBankRef =
+              ntry?.AcctSvcrRef !== 'NOTPROVIDED' && ntry?.AcctSvcrRef
+                ? String(ntry.AcctSvcrRef)
+                : undefined;
+            const bankTransactionId =
+              rawEndToEndId || tx?.Refs?.InstrId || rawBankRef || undefined;
 
             const id =
               bankTransactionId ||
-              `camt053-${bookingDate}-${amountCents}-${stmtIdx + 1}-${ntryIdx + 1}-${txIdx + 1}`;
+              generateTransactionFingerprint({
+                accountIban,
+                bookingDate,
+                amountCents,
+                currency,
+                bankRef: rawBankRef || reference,
+                endToEndId: rawEndToEndId,
+                direction,
+              });
 
             transactions.push({
               id,
@@ -290,10 +320,24 @@ export class Camt053Parser implements StatementParser {
             : baseNtryDirection;
 
           const { amountCents } = parseAmountToCents(parentRawAmount, direction);
-          const bankTransactionId = ntry?.AcctSvcrRef ? String(ntry.AcctSvcrRef) : undefined;
+          const rawBankRef =
+            ntry?.AcctSvcrRef !== 'NOTPROVIDED' && ntry?.AcctSvcrRef
+              ? String(ntry.AcctSvcrRef)
+              : undefined;
+          const bankTransactionId = rawBankRef || undefined;
+          const reference = ntry?.AddtlNtryInf ? String(ntry.AddtlNtryInf).trim() : undefined;
+
           const id =
             bankTransactionId ||
-            `camt053-${ntryBookingDate}-${amountCents}-${stmtIdx + 1}-${ntryIdx + 1}-1`;
+            generateTransactionFingerprint({
+              accountIban,
+              bookingDate: ntryBookingDate,
+              amountCents,
+              currency: parentCurrency,
+              bankRef: rawBankRef || reference,
+              endToEndId: undefined,
+              direction,
+            });
 
           const { name: counterpartyName, iban: counterpartyIban } = extractCounterparty(undefined, direction, ntry);
 
@@ -306,7 +350,7 @@ export class Camt053Parser implements StatementParser {
             direction,
             counterpartyName,
             counterpartyIban,
-            reference: ntry?.AddtlNtryInf ? String(ntry.AddtlNtryInf).trim() : undefined,
+            reference,
             bankTransactionId,
             sourceFormat: this.id,
             isReversal: ntryIsReversal ? true : undefined,

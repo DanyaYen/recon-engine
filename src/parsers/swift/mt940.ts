@@ -2,6 +2,7 @@ import type { StatementParser, ParseOptions } from '../base.js';
 import type { NormalizedTransaction } from '../../schemas/transaction.js';
 import { parseAmountToCents } from '../../utils/money.js';
 import { parseBankDate } from '../../utils/date.js';
+import { generateTransactionFingerprint } from '../../utils/fingerprint.js';
 
 interface RawMt940Transaction {
   statementLine: string; // :61:
@@ -29,13 +30,16 @@ export class Mt940Parser implements StatementParser {
 
     // Extract default currency from :60F: opening balance if available
     let statementCurrency = options?.defaultCurrency || 'EUR';
+    let accountIban: string | undefined;
     const rawTransactions: RawMt940Transaction[] = [];
     let currentTx: RawMt940Transaction | null = null;
 
     const commitTag = (tag: string, contentLines: string[]) => {
       const fullText = contentLines.join('\n').trim();
 
-      if (tag === '60F' || tag === '60M') {
+      if (tag === '25' || tag === '25P') {
+        accountIban = fullText.replace(/\s+/g, '');
+      } else if (tag === '60F' || tag === '60M') {
         // Example: :60F:C240901EUR10000,00
         const match = fullText.match(/[CD]\d{6}([A-Z]{3})/);
         if (match) {
@@ -93,10 +97,18 @@ export class Mt940Parser implements StatementParser {
         item.infoLine || ''
       );
 
-      const id =
-        bankRef && bankRef !== 'NONREF'
-          ? bankRef
-          : `mt940-${bookingDate}-${amountCents}-${i + 1}`;
+      const hasBankId = Boolean(bankRef && bankRef !== 'NONREF' && bankRef.trim() !== '');
+      const id = hasBankId
+        ? bankRef!
+        : generateTransactionFingerprint({
+            accountIban: accountIban || undefined,
+            bookingDate,
+            amountCents,
+            currency,
+            bankRef: reference,
+            endToEndId: undefined,
+            direction,
+          });
 
       transactions.push({
         id,

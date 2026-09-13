@@ -8,4 +8,5 @@ export * from './utils/date.js';
 export * from './utils/text.js';
 export * from './utils/csv.js';
 export * from './utils/fuzzy.js';
+export * from './utils/fingerprint.js';
 export * from './ledger/index.js';
