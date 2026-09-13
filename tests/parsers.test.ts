@@ -71,6 +71,29 @@ describe('Universal Statement Parser - Auto Detection and Parsing', () => {
         }
       });
     }
+
+    it('does not classify generic CSV containing "Stripe Payout" in cell data as stripe-csv', async () => {
+      const genericCsv = `Date,Amount,Currency,Partner Name,Label\n2024-09-01,100.00,EUR,Stripe Payout,Subscription\n2024-09-02,50.00,EUR,Regular Client,Invoice 123`;
+      const detected = detectFormat(genericCsv, 'bank_export.csv');
+      expect(detected.id).toBe('generic-csv');
+      expect(detected.id).not.toBe('stripe-csv');
+
+      const result = await parseStatement(genericCsv);
+      expect(result.parserId).toBe('generic-csv');
+      expect(result.transactions.length).toBe(2);
+      expect(result.transactions[0].counterpartyName).toBe('Stripe Payout');
+    });
+
+    it('detects Stripe CSV based on characteristic headers', () => {
+      const csvWithBalanceTxnId = `Balance transaction ID,Created (UTC),Amount,Currency\ntxn_123,2024-09-01 10:00:00,10.00,usd`;
+      expect(detectFormat(csvWithBalanceTxnId).id).toBe('stripe-csv');
+
+      const csvWithReportingCategory = `Reporting category,id,Gross,Fee,Net,Currency\ncharge,ch_123,10.00,0.50,9.50,usd`;
+      expect(detectFormat(csvWithReportingCategory).id).toBe('stripe-csv');
+
+      const csvWithGrossFeeNet = `Date,Description,Gross,Fee,Net,Currency\n2024-09-01,Payment,100.00,3.00,97.00,USD`;
+      expect(detectFormat(csvWithGrossFeeNet).id).toBe('stripe-csv');
+    });
   });
 
   // 3. CAMT.053 XML fixtures

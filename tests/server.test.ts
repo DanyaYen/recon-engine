@@ -152,4 +152,66 @@ describe('HTTP API Server (Elysia)', () => {
     const healthBody: any = await healthRes.json();
     expect(healthBody.status).toBe('ok');
   });
+
+  it('prioritizes explicit format over auto-detection in POST /v1/match', async () => {
+    const stmtCsv = `Date,Amount,Currency,Partner Name,Label\n2024-09-01,1500.00,EUR,Stripe Payout,INV-2024-001`;
+    const invoices = [
+      {
+        id: 'inv_1',
+        invoiceNumber: 'INV-2024-001',
+        amountCents: 150000,
+        currency: 'EUR',
+        issueDate: '2024-09-01',
+        status: 'OPEN',
+        customerName: 'Stripe Payout',
+      },
+    ];
+
+    // 1. Explicit format at top level of body
+    const res1 = await app.handle(
+      new Request('http://localhost/v1/match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          statement: stmtCsv,
+          invoices,
+          format: 'generic-csv',
+        }),
+      })
+    );
+    expect(res1.status).toBe(200);
+    const report1: any = await res1.json();
+    expect(report1.summary.matchedCount).toBe(1);
+
+    // 2. Explicit format in options.format
+    const res2 = await app.handle(
+      new Request('http://localhost/v1/match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          statement: stmtCsv,
+          invoices,
+          options: { format: 'generic-csv' },
+        }),
+      })
+    );
+    expect(res2.status).toBe(200);
+    const report2: any = await res2.json();
+    expect(report2.summary.matchedCount).toBe(1);
+
+    // 3. Explicit format in query parameter
+    const res3 = await app.handle(
+      new Request('http://localhost/v1/match?format=generic-csv', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          statement: stmtCsv,
+          invoices,
+        }),
+      })
+    );
+    expect(res3.status).toBe(200);
+    const report3: any = await res3.json();
+    expect(report3.summary.matchedCount).toBe(1);
+  });
 });

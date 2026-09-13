@@ -33,6 +33,14 @@ export const MatchRequestSchema = z.object({
     }),
   ]),
   format: z.string().optional(),
+  options: z
+    .object({
+      format: z.string().optional(),
+      columnMapping: z.record(z.string()).optional(),
+      defaultCurrency: z.string().optional(),
+    })
+    .passthrough()
+    .optional(),
   dateToleranceDays: z.coerce.number().int().nonnegative().optional().default(2),
   feeToleranceCents: z.coerce.number().int().nonnegative().optional().default(2500),
   feeTolerancePercent: z.coerce.number().min(0).max(1).optional(),
@@ -136,7 +144,21 @@ export function createServerApp() {
           invoices = await loadInvoices(payload.invoices);
         }
 
-        const stmtResult = await parseStatement(statementContent, { format: payload.format });
+        let queryFormat: string | undefined;
+        try {
+          const url = new URL(request.url);
+          queryFormat = url.searchParams.get('format') || undefined;
+        } catch {
+          // ignore url parsing error
+        }
+
+        const explicitFormat = payload.format || payload.options?.format || queryFormat;
+
+        const stmtResult = await parseStatement(statementContent, {
+          format: explicitFormat,
+          columnMapping: payload.options?.columnMapping,
+          defaultCurrency: payload.options?.defaultCurrency,
+        });
 
         const report = reconcile(stmtResult.transactions, invoices, {
           dateToleranceDays: payload.dateToleranceDays,
