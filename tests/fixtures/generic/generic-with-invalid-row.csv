@@ -1,0 +1,4 @@
+date,amount,currency,counterparty,reference
+2024-09-01,150.00,EUR,Alpha Services,INV-2024-001
+INVALID-DATE,200.00,EUR,Bad Date LLC,INV-2024-002
+2024-09-03,300.00,EUR,Gamma Holdings,INV-2024-003

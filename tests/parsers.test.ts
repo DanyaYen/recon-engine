@@ -213,6 +213,28 @@ describe('Universal Statement Parser - Auto Detection and Parsing', () => {
       expect(result.transactions[0].counterpartyName).toBe('ZALANDO SE');
       expect(result.transactions[0].reference).toBe('INV-2024-998');
     });
+
+    it('unwraps SWIFT envelopes ({1:...}{4:... -}) and parses transactions in mt940-enveloped.sta', async () => {
+      const content = readFileSync(join(mt940Dir, 'mt940-enveloped.sta'), 'utf-8');
+      const detected = detectFormat(content, 'mt940-enveloped.sta');
+      expect(detected.id).toBe('mt940');
+
+      const result = await parseStatement(content);
+      expect(result.parserId).toBe('mt940');
+      expect(result.transactions.length).toBe(2);
+      expect(result.rejectedRows.length).toBe(0);
+
+      const [tx1, tx2] = result.transactions;
+      expect(tx1.bookingDate).toBe('2024-09-01');
+      expect(tx1.amountCents).toBe(150000);
+      expect(tx1.direction).toBe('INCOMING');
+      expect(tx1.reference).toContain('INV-2024-ENV1');
+
+      expect(tx2.bookingDate).toBe('2024-09-02');
+      expect(tx2.amountCents).toBe(45000);
+      expect(tx2.direction).toBe('OUTGOING');
+      expect(tx2.reference).toContain('INV-2024-ENV2');
+    });
   });
 
   // 5. Generic CSV fixtures
@@ -252,6 +274,30 @@ describe('Universal Statement Parser - Auto Detection and Parsing', () => {
       expect(result.transactions[0].counterpartyName).toBe('FinTech Client A');
       expect(result.transactions[0].reference).toBe('INV-MAP-001');
       expect(result.transactions[0].amountCents).toBe(220000);
+    });
+
+    it('quarantines invalid rows into rejectedRows while parsing valid rows in batch', async () => {
+      const content = readFileSync(join(genericDir, 'generic-with-invalid-row.csv'), 'utf-8');
+      const result = await parseStatement(content);
+      expect(result.parserId).toBe('generic-csv');
+      expect(result.transactions.length).toBe(2);
+      expect(result.rejectedRows.length).toBe(1);
+
+      // Valid transactions
+      expect(result.transactions[0].bookingDate).toBe('2024-09-01');
+      expect(result.transactions[0].amountCents).toBe(15000);
+      expect(result.transactions[0].counterpartyName).toBe('Alpha Services');
+
+      expect(result.transactions[1].bookingDate).toBe('2024-09-03');
+      expect(result.transactions[1].amountCents).toBe(30000);
+      expect(result.transactions[1].counterpartyName).toBe('Gamma Holdings');
+
+      // Quarantined invalid row
+      const rejected = result.rejectedRows[0];
+      expect(rejected.index).toBe(1);
+      expect(rejected.error).toBeDefined();
+      expect(rejected.error.issues.length).toBeGreaterThan(0);
+      expect((rejected.raw as any).counterpartyName || (rejected.raw as any).counterparty).toContain('Bad Date');
     });
   });
 });

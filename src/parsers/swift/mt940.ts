@@ -15,16 +15,22 @@ export class Mt940Parser implements StatementParser {
   readonly description = 'SWIFT MT940 Customer Statement Message standard';
 
   supports(content: string): boolean {
-    const head = content.slice(0, 1500);
+    const head = content.slice(0, 3000);
+    const envelopeStart = head.indexOf('{4:');
+    const searchTarget = envelopeStart !== -1 ? content.slice(envelopeStart, envelopeStart + 3000) : head;
     return (
-      (head.includes(':20:') || head.includes(':25:')) &&
-      (head.includes(':60F:') || head.includes(':60M:')) &&
-      head.includes(':61:')
+      (searchTarget.includes(':20:') || searchTarget.includes(':25:')) &&
+      (searchTarget.includes(':60F:') || searchTarget.includes(':60M:')) &&
+      searchTarget.includes(':61:')
     );
   }
 
   async parse(content: string, options?: ParseOptions): Promise<NormalizedTransaction[]> {
-    const lines = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    // Detect and unwrap SWIFT envelope (Block 4) if present
+    const envelopeMatch = content.match(/\{4:\r?\n([\s\S]*?)(?:\r?\n-\})/);
+    const effectiveContent = envelopeMatch ? envelopeMatch[1] : content;
+
+    const lines = effectiveContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
     let currentTag = '';
     let currentTagContent: string[] = [];
 
@@ -150,14 +156,25 @@ export class Mt940Parser implements StatementParser {
     if (!match) return null;
 
     const rawDate = match[1];
-    const bookingDate = parseBankDate(rawDate);
+    let bookingDate: string;
+    try {
+      bookingDate = parseBankDate(rawDate);
+    } catch {
+      bookingDate = String(rawDate || '');
+    }
 
     const dcMark = match[3];
     const isCredit = dcMark === 'C' || dcMark === 'RC';
     const direction: 'INCOMING' | 'OUTGOING' = isCredit ? 'INCOMING' : 'OUTGOING';
 
     const rawAmount = match[5];
-    const { amountCents } = parseAmountToCents(rawAmount, direction);
+    let amountCents = 0;
+    try {
+      const parsedAmount = parseAmountToCents(rawAmount, direction);
+      amountCents = parsedAmount.amountCents;
+    } catch {
+      amountCents = -1;
+    }
 
     const remainder = match[6] || '';
     let bankRef: string | undefined = undefined;

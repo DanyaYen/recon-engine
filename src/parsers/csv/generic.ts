@@ -59,11 +59,24 @@ export class GenericCsvParser implements StatementParser {
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
 
-      const rawDate = dateCol ? row[dateCol] : undefined;
-      const bookingDate = parseBankDate(rawDate);
+      let bookingDate: string;
+      try {
+        const rawDate = dateCol ? row[dateCol] : undefined;
+        bookingDate = parseBankDate(rawDate);
+      } catch {
+        bookingDate = String(dateCol && row[dateCol] !== undefined ? row[dateCol] : '');
+      }
 
-      const rawAmount = amountCol ? row[amountCol] : '0';
-      const { amountCents, direction } = parseAmountToCents(rawAmount);
+      let amountCents = 0;
+      let direction: 'INCOMING' | 'OUTGOING' = 'INCOMING';
+      try {
+        const rawAmount = amountCol ? row[amountCol] : '0';
+        const parsed = parseAmountToCents(rawAmount);
+        amountCents = parsed.amountCents;
+        direction = parsed.direction;
+      } catch {
+        amountCents = -1;
+      }
 
       const currency = (currencyCol && row[currencyCol] ? row[currencyCol] : defaultCurrency).toUpperCase();
       const reference = refCol ? row[refCol]?.trim() : undefined;

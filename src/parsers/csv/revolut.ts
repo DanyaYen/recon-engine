@@ -40,12 +40,25 @@ export class RevolutCsvParser implements StatementParser {
         row['Date started'] ||
         row['Date'] ||
         '';
-      const bookingDate = parseBankDate(rawDate);
+      let bookingDate: string;
+      try {
+        bookingDate = parseBankDate(rawDate);
+      } catch {
+        bookingDate = String(rawDate || '');
+      }
 
       // Amount & Currency
       const rawAmount = row['Amount'] || '0';
       const currency = (row['Currency'] || 'EUR').toUpperCase();
-      const { amountCents, direction } = parseAmountToCents(rawAmount);
+      let amountCents = 0;
+      let direction: 'INCOMING' | 'OUTGOING' = 'INCOMING';
+      try {
+        const parsed = parseAmountToCents(rawAmount);
+        amountCents = parsed.amountCents;
+        direction = parsed.direction;
+      } catch {
+        amountCents = -1;
+      }
 
       // Description & Counterparty & Reference
       const description = (row['Description'] || '').trim();

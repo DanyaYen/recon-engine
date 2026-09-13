@@ -98,6 +98,7 @@ export function createServerApp() {
           parserName: result.parserName,
           count: result.transactions.length,
           transactions: result.transactions,
+          rejectedRows: result.rejectedRows,
         };
       } catch (err: unknown) {
         set.status = 400;

@@ -44,12 +44,25 @@ export class StripeCsvParser implements StatementParser {
         row['Available on (UTC)'] ||
         row['Date'] ||
         '';
-      const bookingDate = parseBankDate(rawDate);
+      let bookingDate: string;
+      try {
+        bookingDate = parseBankDate(rawDate);
+      } catch {
+        bookingDate = String(rawDate || '');
+      }
 
       // Gross Amount (or Amount)
       const rawAmount = row['Gross'] || row['Amount'] || row['amount'] || '0';
       const currency = (row['Currency'] || row['currency'] || 'USD').toUpperCase();
-      const { amountCents, direction } = parseAmountToCents(rawAmount);
+      let amountCents = 0;
+      let direction: 'INCOMING' | 'OUTGOING' = 'INCOMING';
+      try {
+        const parsed = parseAmountToCents(rawAmount);
+        amountCents = parsed.amountCents;
+        direction = parsed.direction;
+      } catch {
+        amountCents = -1;
+      }
 
       // Customer info
       const counterpartyName =
