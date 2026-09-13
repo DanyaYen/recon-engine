@@ -131,3 +131,9 @@ export async function loadInvoices(pathOrContent: string): Promise<NormalizedInv
 
   return invoices;
 }
+
+/**
+ * Alias for loadInvoices to parse invoice content directly from text or files.
+ */
+export const parseInvoices = loadInvoices;
+

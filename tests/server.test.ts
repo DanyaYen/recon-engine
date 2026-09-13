@@ -214,4 +214,96 @@ describe('HTTP API Server (Elysia)', () => {
     const report3: any = await res3.json();
     expect(report3.summary.matchedCount).toBe(1);
   });
+
+  it('supports multipart/form-data file uploads in POST /v1/match with files for statement and invoices', async () => {
+    const stmtCsv = `Completed Date,Description,Amount,Fee,Currency,State,Balance,Payer,Beneficiary,Reference\n2024-09-01 10:00:00,Payment from Acme Corp,1500.00,0.00,EUR,COMPLETED,1500.00,Acme Corp GmbH,,INV-2024-001`;
+
+    const invoicesJson = JSON.stringify([
+      {
+        id: 'inv_1',
+        invoiceNumber: 'INV-2024-001',
+        amountCents: 150000,
+        currency: 'EUR',
+        issueDate: '2024-09-01',
+        status: 'OPEN',
+        customerName: 'Acme Corp GmbH',
+      },
+    ]);
+
+    const form = new FormData();
+    form.append('file', new Blob([stmtCsv], { type: 'text/csv' }), 'statement.csv');
+    form.append('invoices', new Blob([invoicesJson], { type: 'application/json' }), 'invoices.json');
+
+    const res = await app.handle(
+      new Request('http://localhost/v1/match', {
+        method: 'POST',
+        body: form,
+      })
+    );
+
+    expect(res.status).toBe(200);
+    const report: any = await res.json();
+    expect(report.summary.matchedCount).toBe(1);
+    expect(report.matches[0].status).toBe('MATCHED');
+    expect(report.matches[0].level).toBe('EXACT_REFERENCE');
+  });
+
+  it('supports multipart/form-data with statement field and CSV invoices', async () => {
+    const stmtCsv = `Completed Date,Description,Amount,Fee,Currency,State,Balance,Payer,Beneficiary,Reference\n2024-09-01 10:00:00,Payment from Acme Corp,1500.00,0.00,EUR,COMPLETED,1500.00,Acme Corp GmbH,,INV-2024-001`;
+    const invoicesCsv = `Invoice Number,Amount,Currency,Issue Date,Customer Name\nINV-2024-001,1500.00,EUR,2024-09-01,Acme Corp GmbH`;
+
+    // 1. Invoices uploaded as a CSV file/blob
+    const formFile = new FormData();
+    formFile.append('statement', new Blob([stmtCsv], { type: 'text/csv' }), 'statement.csv');
+    formFile.append('invoices', new Blob([invoicesCsv], { type: 'text/csv' }), 'invoices.csv');
+
+    const resFile = await app.handle(
+      new Request('http://localhost/v1/match', {
+        method: 'POST',
+        body: formFile,
+      })
+    );
+    expect(resFile.status).toBe(200);
+    const reportFile: any = await resFile.json();
+    expect(reportFile.summary.matchedCount).toBe(1);
+
+    // 2. Invoices uploaded as a stringified CSV text field
+    const formText = new FormData();
+    formText.append('file', new Blob([stmtCsv], { type: 'text/csv' }), 'statement.csv');
+    formText.append('invoices', invoicesCsv);
+
+    const resText = await app.handle(
+      new Request('http://localhost/v1/match', {
+        method: 'POST',
+        body: formText,
+      })
+    );
+    expect(resText.status).toBe(200);
+    const reportText: any = await resText.json();
+    expect(reportText.summary.matchedCount).toBe(1);
+  });
+
+  it('validates required fields in multipart/form-data in POST /v1/match', async () => {
+    // Missing invoices
+    const formNoInv = new FormData();
+    formNoInv.append('file', new Blob(['test'], { type: 'text/csv' }), 'statement.csv');
+    const resNoInv = await app.handle(
+      new Request('http://localhost/v1/match', {
+        method: 'POST',
+        body: formNoInv,
+      })
+    );
+    expect(resNoInv.status).toBe(400);
+
+    // Missing statement / file
+    const formNoStmt = new FormData();
+    formNoStmt.append('invoices', '[]');
+    const resNoStmt = await app.handle(
+      new Request('http://localhost/v1/match', {
+        method: 'POST',
+        body: formNoStmt,
+      })
+    );
+    expect(resNoStmt.status).toBe(400);
+  });
 });

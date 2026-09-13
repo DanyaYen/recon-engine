@@ -1,7 +1,7 @@
 import { Elysia } from 'elysia';
 import { z } from 'zod';
 import { parseStatement } from '../parsers/index.js';
-import { loadInvoices, InvalidInvoiceDataError } from '../matcher/invoices.js';
+import { loadInvoices, parseInvoices, InvalidInvoiceDataError } from '../matcher/invoices.js';
 import { reconcile, type MatcherOptions } from '../matcher/engine.js';
 import { NormalizedInvoiceSchema, type NormalizedInvoice } from '../schemas/invoice.js';
 
@@ -121,28 +121,15 @@ export function createServerApp() {
     })
     .post('/v1/match', async ({ request, body, set }) => {
       try {
-        const raw = await extractPayload(request, body);
-        const payload = MatchRequestSchema.parse(raw);
-
-        let statementContent = '';
-        const stmtObj = payload.statement as any;
-        if (stmtObj instanceof Blob || (stmtObj && typeof stmtObj.text === 'function')) {
-          statementContent = await stmtObj.text();
-        } else {
-          statementContent = payload.statement as string;
-        }
-
-        let invoices: NormalizedInvoice[] = [];
-        const invObj = payload.invoices as any;
-        if (Array.isArray(payload.invoices)) {
-          // Strictly validated via NormalizedInvoiceSchema
-          invoices = payload.invoices;
-        } else if (invObj instanceof Blob || (invObj && typeof invObj.text === 'function')) {
-          const invoicesText = await invObj.text();
-          invoices = await loadInvoices(invoicesText);
-        } else if (typeof payload.invoices === 'string') {
-          invoices = await loadInvoices(payload.invoices);
-        }
+        const contentType = request.headers.get('content-type') || '';
+        const isMultipart =
+          contentType.includes('multipart/form-data') ||
+          body instanceof FormData ||
+          (body &&
+            typeof body === 'object' &&
+            ('file' in (body as any) ||
+              (body as any).statement instanceof Blob ||
+              (body as any).invoices instanceof Blob));
 
         let queryFormat: string | undefined;
         try {
@@ -152,19 +139,142 @@ export function createServerApp() {
           // ignore url parsing error
         }
 
-        const explicitFormat = payload.format || payload.options?.format || queryFormat;
+        let statementContent = '';
+        let invoices: NormalizedInvoice[] = [];
+        let explicitFormat: string | undefined;
+        let columnMapping: Record<string, string> | undefined;
+        let defaultCurrency: string | undefined;
+        let dateToleranceDays = 2;
+        let feeToleranceCents = 2500;
+        let feeTolerancePercent: number | undefined;
+        let feeTolerancePercentage: number | undefined;
+
+        if (isMultipart) {
+          let formBody: Record<string, any> = {};
+          if (body && typeof body === 'object') {
+            formBody = body as Record<string, any>;
+          } else {
+            try {
+              const formData = await request.formData();
+              formBody = Object.fromEntries(formData.entries());
+            } catch {
+              // ignore
+            }
+          }
+
+          const rawStatement = formBody.file ?? formBody.statement;
+          if (!rawStatement) {
+            set.status = 400;
+            return { error: 'Missing statement file or content in request.' };
+          }
+
+          if (rawStatement instanceof Blob || (rawStatement && typeof (rawStatement as any).text === 'function')) {
+            statementContent = await (rawStatement as Blob).text();
+          } else if (typeof rawStatement === 'string') {
+            statementContent = rawStatement;
+          }
+
+          if (!statementContent || statementContent.trim().length === 0) {
+            set.status = 400;
+            return { error: 'Missing statement content in request.' };
+          }
+
+          const rawInvoices = formBody.invoices;
+          if (!rawInvoices) {
+            set.status = 400;
+            return { error: 'Missing invoices content in request.' };
+          }
+
+          if (rawInvoices instanceof Blob || (rawInvoices && typeof (rawInvoices as any).text === 'function')) {
+            const invoicesText = await (rawInvoices as Blob).text();
+            invoices = await parseInvoices(invoicesText);
+          } else if (typeof rawInvoices === 'string') {
+            invoices = await parseInvoices(rawInvoices);
+          } else if (Array.isArray(rawInvoices)) {
+            const parsedArray = z.array(NormalizedInvoiceSchema).safeParse(rawInvoices);
+            if (!parsedArray.success) {
+              set.status = 400;
+              return { error: parsedArray.error.errors.map((e) => e.message).join('; ') };
+            }
+            invoices = parsedArray.data;
+          }
+
+          if (invoices.length === 0) {
+            set.status = 400;
+            return { error: 'Invoices array cannot be empty.' };
+          }
+
+          explicitFormat = formBody.format || queryFormat;
+          if (formBody.options && typeof formBody.options === 'string') {
+            try {
+              const parsedOpts = JSON.parse(formBody.options);
+              explicitFormat = explicitFormat || parsedOpts.format;
+              columnMapping = parsedOpts.columnMapping;
+              defaultCurrency = parsedOpts.defaultCurrency;
+            } catch {
+              // ignore json parse error
+            }
+          }
+
+          if (formBody.dateToleranceDays !== undefined) {
+            const parsed = Number(formBody.dateToleranceDays);
+            if (!isNaN(parsed)) dateToleranceDays = parsed;
+          }
+          if (formBody.feeToleranceCents !== undefined) {
+            const parsed = Number(formBody.feeToleranceCents);
+            if (!isNaN(parsed)) feeToleranceCents = parsed;
+          }
+          if (formBody.feeTolerancePercent !== undefined) {
+            const parsed = Number(formBody.feeTolerancePercent);
+            if (!isNaN(parsed)) feeTolerancePercent = parsed;
+          }
+          if (formBody.feeTolerancePercentage !== undefined) {
+            const parsed = Number(formBody.feeTolerancePercentage);
+            if (!isNaN(parsed)) feeTolerancePercentage = parsed;
+          }
+        } else {
+          // application/json (or other standard payload)
+          const raw = await extractPayload(request, body);
+          const payload = MatchRequestSchema.parse(raw);
+
+          const stmtObj = payload.statement as any;
+          if (stmtObj instanceof Blob || (stmtObj && typeof stmtObj.text === 'function')) {
+            statementContent = await stmtObj.text();
+          } else {
+            statementContent = payload.statement as string;
+          }
+
+          const invObj = payload.invoices as any;
+          if (Array.isArray(payload.invoices)) {
+            // Strictly validated via NormalizedInvoiceSchema
+            invoices = payload.invoices;
+          } else if (invObj instanceof Blob || (invObj && typeof invObj.text === 'function')) {
+            const invoicesText = await invObj.text();
+            invoices = await parseInvoices(invoicesText);
+          } else if (typeof payload.invoices === 'string') {
+            invoices = await parseInvoices(payload.invoices);
+          }
+
+          explicitFormat = payload.format || payload.options?.format || queryFormat;
+          columnMapping = payload.options?.columnMapping;
+          defaultCurrency = payload.options?.defaultCurrency;
+          dateToleranceDays = payload.dateToleranceDays ?? 2;
+          feeToleranceCents = payload.feeToleranceCents ?? 2500;
+          feeTolerancePercent = payload.feeTolerancePercent;
+          feeTolerancePercentage = payload.feeTolerancePercentage;
+        }
 
         const stmtResult = await parseStatement(statementContent, {
           format: explicitFormat,
-          columnMapping: payload.options?.columnMapping,
-          defaultCurrency: payload.options?.defaultCurrency,
+          columnMapping,
+          defaultCurrency,
         });
 
         const report = reconcile(stmtResult.transactions, invoices, {
-          dateToleranceDays: payload.dateToleranceDays,
-          feeToleranceCents: payload.feeToleranceCents,
-          feeTolerancePercent: payload.feeTolerancePercent,
-          feeTolerancePercentage: payload.feeTolerancePercentage,
+          dateToleranceDays,
+          feeToleranceCents,
+          feeTolerancePercent,
+          feeTolerancePercentage,
           sourceFormat: stmtResult.parserName,
         });
 
