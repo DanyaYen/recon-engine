@@ -1,9 +1,14 @@
 node_modules/
 dist/
-video/
 *.tsbuildinfo
 .DS_Store
 *.log
+
+# Media and Generation Scripts
+assets/
+scripts/
+video/
 benchmarks/
-demo.tape
+*.mp4
 *.tape
+demo.tape

@@ -2,8 +2,6 @@
 
 > Stateless, Deterministic Reconciliation Engine & Parser Library (In-Memory Batch Matching for B2B SaaS).
 
-![The Real-World Reconciliation Benchmark](./assets/benchmark.png)
-
 [![Bun](https://img.shields.io/badge/Bun-1.3+-black.svg?logo=bun)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue.svg?logo=typescript)](https://www.typescriptlang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
@@ -12,8 +10,6 @@
 
 > [!IMPORTANT]
 > **Architectural Boundary & Positioning**: `recon-engine` is **not** a replacement for a General Ledger (GL) or core banking ledger. It is a stateless, deterministic reconciliation engine & parser library designed exclusively for pure in-memory batch calculations inside the user's own infrastructure. Double-entry bookkeeping, ledger balance mutations, and financial audit persistence remain strictly the responsibility of your primary database and GL.
-
-![Reconciliation-as-Code Demo](./demo.gif)
 
 ---
 
